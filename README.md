@@ -2,44 +2,6 @@
 
 This repository contains common configurations and packages for ESPHome devices. These configurations can be included in your ESPHome projects to simplify setup and ensure consistency across multiple devices.
 
-## Directory Structure
-
-```
-common/
-  api.yaml
-  common_defaults.yaml
-  device_base_esp8266.yaml
-  device_base.yaml
-  logger.yaml
-  time.yaml
-  web_server.yaml
-  wifi.yaml
-  binary_sensor/
-    gpio_sensor.yaml
-    status.yaml
-  button/
-    restart.yaml
-  features/
-    maximumactive.yaml
-    sleepfunc.bak
-    sleepfunc.yaml
-  sensor/
-    uptime.yaml
-  switch/
-    relay01s.yaml
-  text_sensor/
-    version.yaml
-api.yaml
-common_defaults.yaml
-device_base_esp8266.yaml
-device_base.yaml
-esphome-commons.code-workspace
-logger.yaml
-time.yaml
-web_server.yaml
-wifi.yaml
-```
-
 ## Usage
 
 To use these common configurations in your ESPHome project, include the relevant YAML files in your device configuration.
@@ -54,6 +16,13 @@ substitutions:
   friendly_name: My Device
   platform: esp8266
   board: nodemcuv2
+  wifi_ssid: "your_wifi_ssid"
+  wifi_password: "your_wifi_password"
+  api_password: "your_api_password"
+  logger_level: DEBUG
+  web_server_port: 80
+  time_id: homeassistant_time
+  sleep_duration: 60s
 
 packages:
   base: !include common/device_base_esp8266.yaml
@@ -64,6 +33,8 @@ packages:
   time: !include common/time.yaml
   sleepfunc: !include common/features/sleepfunc.yaml
 ```
+
+For more examples check /examples
 
 ## Available Configurations
 
@@ -86,26 +57,37 @@ packages:
 
 - **File:** `common/wifi.yaml`
 - **Description:** WiFi configuration with support for multiple networks, fallback hotspot, OTA updates, and WiFi signal sensors.
+- **Variables:**
+  - `wifi_ssid`: Your WiFi SSID
+  - `wifi_password`: Your WiFi password
 
 ### API Configuration
 
 - **File:** `common/api.yaml`
 - **Description:** Home Assistant API configuration with encryption.
+- **Variables:**
+  - `api_password`: Your API password
 
 ### Logger Configuration
 
 - **File:** `common/logger.yaml`
 - **Description:** Logger configuration with customizable log level and baud rate.
+- **Variables:**
+  - `logger_level`: Log level (e.g., DEBUG, INFO, WARN, ERROR)
 
 ### Web Server Configuration
 
 - **File:** `common/web_server.yaml`
 - **Description:** Web server configuration with authentication.
+- **Variables:**
+  - `web_server_port`: Port for the web server
 
 ### Time Configuration
 
 - **File:** `common/time.yaml`
 - **Description:** Time configuration using Home Assistant as the time source.
+- **Variables:**
+  - `time_id`: ID for the time component
 
 ### Binary Sensors
 
@@ -121,6 +103,8 @@ packages:
 
 - **Files:** `common/features/maximumactive.yaml`, `common/features/sleepfunc.yaml`
 - **Description:** Configurations for features like maximum active time and sleep functions.
+- **Variables:**
+  - `sleep_duration`: Duration for sleep mode (e.g., 60s)
 
 ### Sensors
 
