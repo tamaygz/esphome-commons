@@ -1,0 +1,67 @@
+# feature that limits maximum off time of a device
+# for now only supports monitoring of switches (could also pass a lambda to evaluate in the future if needed)
+# please pass 'monitored_switch' as variable
+globals:
+  - id: maxactive_last_activation
+    type: time_t
+    restore_value: no
+    initial_value: '0'
+
+# inputs
+number:
+  - platform: template
+    name: "Maximum ON time (hours)"
+    id: "max_hours_active"
+    initial_value: 2
+    optimistic: true
+    step: 1
+    min_value: 1
+    max_value: 100
+    mode: box
+    entity_category: config
+    restore_value: true
+
+switch:
+  - id: !extend ${monitored_switch}
+    on_turn_on:
+      - script.stop: maxactive_watchdog
+      - globals.set:
+          id: maxactive_last_activation
+          value: !lambda "return id(ha_time).now().timestamp;"
+      - script.execute: maxactive_watchdog
+      - if:
+          condition:
+            switch.is_on: limit_active_time
+          then:
+            - lambda: |-
+                int delay = (int)id(max_hours_active).state;
+                time_t target = (id(maxactive_last_activation) + (delay * 60 * 60));
+                ESP_LOGD("sleep", "MAXA mode engaged at %d", id(ha_time).now());
+                ESP_LOGD("sleep", "After delay of %dhours switch will be deactivated at %d ..", delay, (int) target );
+    on_turn_off:
+      - script.stop: maxactive_watchdog
+  - platform: template
+    name: Limit Active Time (maxhours)
+    id: limit_active_time
+    optimistic: true
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_OFF
+  # on_turn_off:
+  #   logger.log: watching disabled
+  # on_turn_on:
+  #   logger.log: watching enabled
+
+script:
+  - id: maxactive_watchdog
+    then:
+      - while:
+          condition:
+            switch.is_on: limit_active_time
+          then:
+            - if:
+                condition:
+                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(maxactive_last_activation) + ((int)id(max_hours_active).state * 60 * 60)) );'
+                then:
+                  - logger.log: max active time reached, turning off
+                  - switch.turn_off: ${monitored_switch}
+            - delay: 10 min

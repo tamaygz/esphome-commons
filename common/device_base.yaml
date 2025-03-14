@@ -1,0 +1,22 @@
+<<: !include common_defaults.yaml
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: false
+  project:
+    name: esphome.${name}
+    version: ${version}
+
+${platform}:
+  board: ${board}
+
+packages:
+  wifi:             !include wifi.yaml
+  api:              !include api.yaml
+  logger:           !include logger.yaml
+  status_sensor:    !include binary_sensor/status.yaml
+  restart_button:   !include button/restart.yaml
+  version_sensor:   !include text_sensor/version.yaml
+  time:             !include time.yaml
+# uptime_sensor:    !include sensor/uptime.yaml

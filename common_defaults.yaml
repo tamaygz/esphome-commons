@@ -1,0 +1,6 @@
+substitutions:
+  name: my_esp_device
+  friendly_name: My ESP Device
+  version: dev
+  log_level: none
+  log_baud_rate: '115200'

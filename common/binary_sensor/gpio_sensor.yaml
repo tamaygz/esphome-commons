@@ -1,0 +1,34 @@
+substitutions:
+  sensor_id: "${name}_gpio_sensor"
+  sensor_name: "${friendly_name} GPIO Sensor"
+  sensor_pin: GPIO02
+  signal_start_callback_script: signal_start_dummy
+  signal_end_callback_script: signal_stop_dummy
+
+binary_sensor:
+  - platform: gpio
+    id: ${sensor_id}
+    name: "${sensor_name}"
+    pin:
+      number: ${sensor_pin}
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 25ms
+      - delayed_off: 25ms
+    on_press:
+      - script.execute: ${signal_start_callback_script}
+    on_release:
+      - script.execute: ${signal_end_callback_script}
+
+script:
+  - id: signal_start_dummy
+    then:
+      - logger.log:
+          format: "[START] No script was executed but the dummy instead."
+          tag: ${sensor_id}
+  - id: signal_stop_dummy
+    then:
+      - logger.log:
+          format: "[STOP] No script was executed but the dummy instead."
+          tag: ${sensor_id}

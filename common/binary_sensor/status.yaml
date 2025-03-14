@@ -1,0 +1,3 @@
+binary_sensor:
+  - platform: status
+    name: ${name} Status

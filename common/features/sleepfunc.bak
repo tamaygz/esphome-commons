@@ -1,0 +1,98 @@
+# feature that offers a winddown (go to sleep) function
+substitutions:
+  sleepmode_engage_callback_script: sleepmode_dummy_script
+
+globals:
+  - id: sleepmode_last_engaged
+    type: time_t
+    restore_value: no
+    initial_value: '0'
+
+switch:
+  - platform: template
+    name: Sleep Mode Engaged
+    id: sleepmode_engaged
+    optimistic: true
+    on_turn_off:
+      - script.stop: sleepmode_check
+    on_turn_on:
+      - globals.set:
+          id: sleepmode_last_engaged
+          value: !lambda "return id(ha_time).now().timestamp;"
+      - lambda: |-
+          int delay = (int)id(sleep_delay_minutes).state;
+          time_t target = (id(sleepmode_last_engaged) + (delay * 60));
+          ESP_LOGD("main", "Sleep mode engaged at %d", id(ha_time).now());
+          ESP_LOGD("main", "After delay of %dmins device will activate sleep sequence at %d ..", delay, (int) target );
+      - script.stop: sleepmode_check
+      - script.execute: sleepmode_check
+
+number:
+  - platform: template
+    id: sleep_delay_minutes
+    name: sleep delay minutes
+    step: 1
+    min_value: 1
+    max_value: 1440
+    initial_value: 30
+    mode: box
+    entity_category: config
+    restore_value: true
+    optimistic: true
+
+# button:
+#   - platform: template
+#     id: sleepmode_engage_button
+#     name: Engage Sleep Mode
+#     on_press: 
+#       - script.execute: sleepmode_engage
+
+script:
+  - id: sleepmode_dummy_script
+    then:
+      - logger.log: SLEEPMODE DUMMY SCRIPT EXECUTED. Please pass a script to this package as var to replace this function.
+  # - id: sleepmode_engage
+  #   then:
+  #     - lambda: |-
+  #         id(sleepmode_engaged).publish_state(true);
+  - id: sleepmode_execute_sleep_function
+    then:
+      - logger.log: executing sleep function
+      - lambda: |-
+          id(sleepmode_engaged).publish_state(false);
+      - script.execute: ${sleepmode_engage_callback_script}
+  - id: sleepmode_check
+    then:
+      - while:
+          condition:
+            switch.is_on: sleepmode_engaged
+          then:
+            # - lambda: |-
+            #     time_t now = id(ha_time).now().timestamp;
+            #     time_t target = (id(sleepmode_last_engaged) + ((int)id(sleep_delay_minutes).state * 60));
+            #     ESP_LOGD("main", "Now: %d", id(ha_time).now());
+            #     ESP_LOGD("main", "Engaged: %d", now);
+            #     ESP_LOGD("main", "Sleep At: %d", target);
+            #     ESP_LOGD("main", "Sleep ?: %d", (now > target));
+            #     ESP_LOGD("main", "Delay: %d", (int)id(sleep_delay_minutes).state);
+            - if:
+                condition:
+                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(sleepmode_last_engaged) + ((int)id(sleep_delay_minutes).state * 60)) );'
+                then:
+                # - logger.log: sleep condition has been matched
+                  - script.execute: sleepmode_execute_sleep_function
+            - delay: 1 min
+
+
+            # time_t target = id(sleepmode_last_engaged) + (5*60);
+            # strftime(str, sizeof(str), "H:M:S", localtime(&bla));
+              # ESP_LOGD("main", "Engaged: %d", id(sleepmode_last_engaged));
+
+            # value: !lambda |-
+            # return id(time_comp).now().minute;
+            # - if:
+            #   condition:# time_t target = id(sleepmode_engaged).last_changed
+
+            #   then:
+
+        
