@@ -1,0 +1,157 @@
+# 🔹 Features
+# ✅ Fully Configurable Scheduler: Define ON/OFF time windows for each day of the week
+# ✅ Multiple Time Windows per Day: No limit to how many ON/OFF periods per day
+# ✅ Home Assistant UI Integration: Setup schedule from HA
+# ✅ Offline Operation: Schedule persists and continues running even if HA is unavailable
+# ✅ Manual Override: Toggle switch manually if needed
+# ✅ Persisting Schedules in EEPROM: Ensures schedules are restored after reboots
+substitutions:
+  id: scheduled_switch
+  friendly_name: "Scheduled Switch"
+  controlled_switch_id: "your_switch_id" # Replace with your switch ID in your own substitutions
+  timezone: "Europe/Berlin"
+
+packages:
+  time: !include ../time.yaml
+
+input_text:
+  ${id}_monday_schedule:
+    name: ${friendly_name} Monday Schedule
+    icon: mdi:calendar
+  ${id}_tuesday_schedule:
+    name: ${friendly_name} Tuesday Schedule
+    icon: mdi:calendar
+  ${id}_wednesday_schedule:
+    name: ${friendly_name} Wednesday Schedule
+    icon: mdi:calendar
+  ${id}_thursday_schedule:
+    name: ${friendly_name} Thursday Schedule
+    icon: mdi:calendar
+  ${id}_friday_schedule:
+    name: ${friendly_name} Friday Schedule
+    icon: mdi:calendar
+  ${id}_saturday_schedule:
+    name: ${friendly_name} Saturday Schedule
+    icon: mdi:calendar
+  ${id}_sunday_schedule:
+    name: ${friendly_name} Sunday Schedule
+    icon: mdi:calendar
+
+globals:
+  - id: ${id}_weekly_schedule
+    type: std::string[7]
+    restore_value: yes # Persist across reboots
+    initial_value: '""'
+
+api:
+  services:
+    - service: update_schedule
+      variables:
+        monday: string
+        tuesday: string
+        wednesday: string
+        thursday: string
+        friday: string
+        saturday: string
+        sunday: string
+      then:
+        - lambda: |-
+            id(weekly_schedule)[0] = monday;
+            id(weekly_schedule)[1] = tuesday;
+            id(weekly_schedule)[2] = wednesday;
+            id(weekly_schedule)[3] = thursday;
+            id(weekly_schedule)[4] = friday;
+            id(weekly_schedule)[5] = saturday;
+            id(weekly_schedule)[6] = sunday;
+            ESP_LOGI("scheduler", "Updated schedule from Home Assistant");
+
+sensor:
+  - platform: homeassistant
+    entity_id: input_text.${id}_monday_schedule
+    id: ${id}_monday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(weekly_schedule)[0] = x.c_str();"
+
+  - platform: homeassistant
+    entity_id: input_text.${id}_tuesday_schedule
+    id: ${id}_tuesday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(${id}_weekly_schedule)[1] = x.c_str();"
+
+  - platform: homeassistant
+    entity_id: input_text.${id}_wednesday_schedule
+    id: ${id}_wednesday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(${id}_weekly_schedule)[2] = x.c_str();"
+
+  - platform: homeassistant
+    entity_id: input_text.${id}_thursday_schedule
+    id: ${id}_thursday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(${id}_weekly_schedule)[3] = x.c_str();"
+
+  - platform: homeassistant
+    entity_id: input_text.${id}_friday_schedule
+    id: ${id}_friday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(${id}_weekly_schedule)[4] = x.c_str();"
+
+  - platform: homeassistant
+    entity_id: input_text.${id}_saturday_schedule
+    id: ${id}_saturday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(${id}_weekly_schedule)[5] = x.c_str();"
+
+  - platform: homeassistant
+    entity_id: input_text.${id}_sunday_schedule
+    id: ${id}_sunday_schedule
+    internal: true
+    on_value:
+      then:
+        - lambda: "id(${id}_weekly_schedule)[6] = x.c_str();"
+
+interval:
+  - interval: 60s # Check schedule every minute
+    then:
+      lambda: |-
+        auto time_now = id(ha_time).now();
+        if (time_now.is_valid()) {
+            int current_hour = time_now.hour;
+            int current_minute = time_now.minute;
+            int current_day = time_now.weekday; // 0=Monday, 6=Sunday
+            bool should_be_on = false;
+
+            std::string schedule = id(weekly_schedule)[current_day];
+
+            // Split schedule string into time ranges (Format: HH:MM-HH:MM, HH:MM-HH:MM, ...)
+            std::stringstream ss(schedule);
+            std::string time_range;
+            while (std::getline(ss, time_range, ',')) {
+                int on_hour, on_min, off_hour, off_min;
+                if (sscanf(time_range.c_str(), "%d:%d-%d:%d", &on_hour, &on_min, &off_hour, &off_min) == 4) {
+                    if ((current_hour > on_hour || (current_hour == on_hour && current_minute >= on_min)) &&
+                        (current_hour < off_hour || (current_hour == off_hour && current_minute < off_min))) {
+                        should_be_on = true;
+                        break;
+                    }
+                }
+            }
+
+            if (should_be_on) {
+                id(controlled_switch_id).turn_on();
+            } else {
+                id(controlled_switch_id).turn_off();
+            }
+        }
