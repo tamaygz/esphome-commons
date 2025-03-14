@@ -1,0 +1,53 @@
+# This ESPHome configuration file is for a Doorbell Interceptor device using an ESP8266 board.
+# 
+# Substitutions:
+# - name: The internal name of the device (e.g., espdoorbell).
+# - friendly_name: The human-readable name of the device (e.g., Doorbell Interceptor).
+# - board: The type of ESP8266 board being used (e.g., esp01_1m).
+# - version: The version of the configuration (e.g., dev).
+# - log_level: The logging level for debugging (e.g., debug).
+#
+# Packages:
+# - base: Includes the common base configuration for ESP8266 devices.
+# - web_server: Includes the configuration for a (secured) web server.
+# - buzzer_relay: Includes the configuration for a relay switch to control a buzzer.
+#   - relay_id: The unique ID for the relay (e.g., espdoorbell_buzzer_relay).
+#   - relay_name: The human-readable name for the relay (e.g., Doorbell Interceptor Buzzer Relay).
+#   - relay_pin: The GPIO pin connected to the relay (e.g., GPIO0).
+#   - relay_timer: Enables a timer for the relay after which it will automatically turn off (e.g., "on").
+#   - relay_timer_interval: The interval for the relay timer in milliseconds (e.g., 2500).
+# - bell_sensor: Includes the configuration for a GPIO binary sensor to detect the doorbell.
+#   - sensor_id: The unique ID for the sensor (e.g., espdoorbell_bellsensor).
+#   - sensor_name: The human-readable name for the sensor (e.g., Doorbell Interceptor Bell Sensor).
+#   - sensor_pin: The GPIO pin connected to the sensor (e.g., GPIO02).
+
+substitutions:
+    name: espdoorbell
+    friendly_name: Doorbell Interceptor
+    board: esp01_1m
+    version: dev
+    log_level: debug
+
+packages:
+    base: !include common/device_base_esp8266.yaml
+    web_server: !include common/web_server.yaml
+
+    buzzer_relay: !include 
+        file: common/switch/relay01s.yaml
+        vars:
+            relay_id: "${name}_buzzer_relay"
+            relay_name: "${friendly_name} Buzzer Relay"
+            relay_pin: GPIO0
+            relay_timer: "on"
+            relay_timer_interval: "2500"
+
+    bell_sensor: !include
+        file: common/binary_sensor/gpio_sensor.yaml
+        vars:
+            sensor_id: "${name}_bellsensor"
+            sensor_name: "${friendly_name} Bell Sensor"
+            sensor_pin: GPIO02
+
+
+
+### todo: one sunny day add intercom features

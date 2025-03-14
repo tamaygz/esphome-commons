@@ -1,0 +1,60 @@
+# This ESPHome configuration file sets up a thermostat control system using an ESP8266 board.
+#
+# Substitutions:
+# - name: The name of the device (e.g., "thermostat").
+# - friendly_name: A user-friendly name for the device (e.g., "Living Room Thermostat").
+# - board: The type of ESP8266 board being used (e.g., "nodemcuv2").
+# - version: The version of the configuration (e.g., "1.0").
+# - log_level: The logging level for debugging (e.g., "DEBUG").
+#
+# Packages:
+# - base: Includes the base configuration for ESP8266 devices.
+# - web_server: Includes the configuration for a web server to control the thermostat via a web interface.
+# - sleepmode: Includes the configuration for sleep mode functionality to save power.
+#   - sleepmode_engage_callback_script: The script to execute when engaging sleep mode (e.g., turn off the relay).
+# - maxactive: Includes the configuration for monitoring the maximum active state of a switch to prevent overheating.
+#   - monitored_switch: The switch to monitor (e.g., the relay switch controlling the thermostat).
+# - thermostatrelay: Includes the configuration for a relay used in the thermostat to control heating/cooling.
+#   - relay_id: The ID of the relay (e.g., "relay_1").
+#   - relay_name: The name of the relay (e.g., "Thermostat Relay").
+#   - relay_pin: The GPIO pin the relay is connected to (e.g., GPIO14).
+#   - relay_timer: Whether the relay has a timer to turn off after a set interval (true/false).
+#   - relay_timer_interval: The interval in milliseconds after which the relay turns off (e.g., 60000 for 1 minute).
+#
+# Script:
+# - callback_gotosleep: A script that turns off the relay switch when executed to save power.
+
+substitutions:
+  name: esptempsensor
+  friendly_name: Livingroom Thermostat
+  board: esp01_1m
+  version: dev
+  log_level: debug
+
+packages:
+  base: !include common/device_base_esp8266.yaml
+  web_server: !include common/web_server.yaml
+  sleepmode: !include
+    file: common/features/sleepfunc.yaml
+    vars:
+      sleepmode_engage_callback_script: callback_gotosleep
+  maxactive: !include
+    file: common/features/maximumactive.yaml
+    vars:
+      monitored_switch: relayswitch
+  thermostatrelay: !include
+    file: common/features/relay01s.yaml
+    vars:
+      relay_id: "${name}_relay"
+      relay_name: "${friendly_name} Relay"
+      relay_pin: GPIO0
+      relay_timer: "on" #on or off, when on, switch turns back off after interval passed
+      relay_timer_interval: "2400000" #value in milliseconds or 40 minutes after which the heating is turned off again
+
+script:
+  - id: callback_gotosleep
+    then:
+      - switch.turn_off: relayswitch
+
+
+### @todo: add features/scheduler, features/temperature_control

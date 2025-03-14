@@ -8,7 +8,14 @@
 		"files.defaultLanguage": "esphome",
 		"files.associations": {
 			"*.yaml": "esphome",
-			"*.md": "markdown" // Added markdown association
-		}
+			 "*.md": "markdown" // Added markdown association 
+
+		},
+		"editor.formatOnSave": true,
+		"files.exclude": {
+			"**/secrets.yaml": true
+		},
+		"editor.formatOnPaste": false,
+		"editor.defaultFormatter": "redhat.vscode-yaml"
 	}
 }
