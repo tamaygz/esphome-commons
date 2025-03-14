@@ -1,0 +1,13 @@
+# Description: This file contains the configuration for the BME280 sensor connected via I2C.
+sensor:  
+  - platform: bme280_i2c
+    i2c_id: bus_a
+    temperature:
+      name: ${name} Temperature
+      oversampling: 16x
+    pressure:
+      name: ${name} Pressure
+    humidity:
+      name: ${name} Humidity
+    address: 0x76
+    update_interval: 60s

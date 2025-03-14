@@ -1,0 +1,11 @@
+substitutions:
+    bus_id: bus_a
+    pin_sda: TX
+    pin_scl: RX
+
+
+i2c:
+  sda: ${pin_sda}
+  scl: ${pin_scl}
+  scan: true
+  id: bus_a
