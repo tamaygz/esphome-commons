@@ -130,7 +130,7 @@ packages:
 ### Switches
 
 - **File:** `common/switch/relay01s.yaml`
-- **Description:** Configuration for a GPIO relay switch with optional timer.
+- **Description:** Configuration for a GPIO relay switch with optional timer (turn off after interval has passed)
 
 ### Text Sensors
 
