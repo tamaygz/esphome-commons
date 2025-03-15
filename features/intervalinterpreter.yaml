@@ -35,7 +35,7 @@ script:
   - id: handle_press
     then:
       - lambda: |-
-          int local_start_time = system_get_time()
+          int local_start_time = system_get_time();
           if (local_start_time - id(last_input_time) > ${reset_time}) {
             id(secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
           }
