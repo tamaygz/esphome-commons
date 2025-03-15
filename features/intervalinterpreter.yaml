@@ -46,7 +46,7 @@ script:
     then:
       - lambda: |-
           int release_time = system_get_time();
-          int press_duration = id(release_time) - id(start_time);
+          int press_duration = release_time - id(start_time);
           if (press_duration < ${short_signal_time}) {
             id(secret_code).append("S");  // Short press
           } else if (press_duration < ${long_signal_time}) {
