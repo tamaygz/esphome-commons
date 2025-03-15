@@ -22,8 +22,10 @@ globals:
 
 binary_sensor:
   - platform: gpio
-    pin: GPIO00
-    inverted: true
+    pin:
+      number: GPIO00
+      # mode: INPUT_PULLUP
+      inverted: true
     name: "Secret Code Switch"
     on_press:
       then:
