@@ -1,9 +1,9 @@
 substitutions:
   id: ${id}
   friendly_name: ${name}
-  reset_time: "3000"
-  short_signal_time: "200"
-  long_signal_time: "750"
+  reset_time: "3000000"
+  short_signal_time: "200000"
+  long_signal_time: "750000"
   monitored_switch_id: monitored_switch
 
 globals:
