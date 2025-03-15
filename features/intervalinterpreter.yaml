@@ -45,9 +45,9 @@ script:
     then:
       - lambda: |-
           int press_duration = esp_timer_get_time() - id(start_time);
-          if (press_duration < ${short_signal_time}) {
+          if (press_duration < ${short_signal_time} * 1000) {
             id(secret_code).append("S");  // Short press
-          } else if (press_duration < ${long_signal_time}) {
+          } else if (press_duration < ${long_signal_time} * 1000) {
             id(secret_code).append("L");  // Long press
           } else {
             id(secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
