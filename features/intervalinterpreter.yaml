@@ -1,0 +1,55 @@
+substitutions:
+  id: ${id}
+  friendly_name: ${name}
+  reset_time: "2000"
+  short_signal_time: "100"
+  long_signal_time: "500"
+  monitored_switch_id: monitored_switch
+
+globals:
+  - id: start_time
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: last_input_time
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: secret_code
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+binary_sensor:
+  - platform: gpio
+    pin: GPIO00
+    name: "Secret Code Switch"
+    on_press:
+      then:
+        - script.execute: handle_press
+    on_release:
+      then:
+        - script.execute: handle_release
+
+script:
+  - id: handle_press
+    then:
+      - lambda: |-
+          if (millis() - id(last_input_time) > ${reset_time}) {
+            id(secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
+          }
+          id(start_time) = millis();
+
+  - id: handle_release
+    then:
+      - lambda: |-
+          int press_duration = millis() - id(start_time);
+          if (press_duration < ${short_signal_time}) {
+            id(secret_code).append('S');  // Short press
+          } else if (press_duration < ${long_signal_time}) {
+            id(secret_code).append('L');  // Long press
+          } else {
+            id(secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
+          }
+          id(last_input_time) = millis();
+          ESP_LOGD("secret_code", "Current secret code: %s", id(secret_code).c_str());
