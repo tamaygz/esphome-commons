@@ -37,6 +37,7 @@ script:
       - lambda: |-
           int local_start_time = system_get_time();
           if (local_start_time - id(last_input_time) > ${reset_time}) {
+            ESP_LOGD("secret_code", "resetting secret code because reset_time has passed");
             id(secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
           }
           id(start_time) = local_start_time;
@@ -53,6 +54,6 @@ script:
           } else {
             id(secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
           }
-          id(last_input_time) = press_duration;
+          id(last_input_time) = release_time;
           ESP_LOGD("secret_code", "Press began at: %d, stopped at: %d, duration: %d ms", id(start_time), id(release_time), press_duration);
           ESP_LOGD("secret_code", "Current secret code: %s", id(secret_code).c_str());
