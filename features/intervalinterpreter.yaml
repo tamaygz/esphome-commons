@@ -45,9 +45,9 @@ script:
       - lambda: |-
           int press_duration = millis() - id(start_time);
           if (press_duration < ${short_signal_time}) {
-            id(secret_code).append('S');  // Short press
+            id(secret_code).append("S");  // Short press
           } else if (press_duration < ${long_signal_time}) {
-            id(secret_code).append('L');  // Long press
+            id(secret_code).append("L");  // Long press
           } else {
             id(secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
           }
