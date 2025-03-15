@@ -1,9 +1,9 @@
 substitutions:
   id: ${id}
   friendly_name: ${name}
-  reset_time: "2000"
-  short_signal_time: "100"
-  long_signal_time: "500"
+  reset_time: "3000"
+  short_signal_time: "200"
+  long_signal_time: "750"
   monitored_switch_id: monitored_switch
 
 globals:
@@ -52,4 +52,5 @@ script:
             id(secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
           }
           id(last_input_time) = millis();
+          ESP_LOGD("secret_code", "Press began at: %d, stopped at: %d, duration: %d ms", id(start_time), millis(), press_duration);
           ESP_LOGD("secret_code", "Current secret code: %s", id(secret_code).c_str());
