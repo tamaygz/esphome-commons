@@ -48,6 +48,9 @@ script:
     parameters:
       new_code: string
     then:
+     - globals.set:
+          id: ${id}_secret_code_to_match
+          value: !lambda "return new_code;"
       - lambda: |-
           if (new_code.empty()) {
             ESP_LOGE("${id}", "[update_secretcode] The new secret code is empty. This will stop the intervalinterpreter from working.");
@@ -55,14 +58,13 @@ script:
           if (new_code.length() == 1) {
             ESP_LOGW("${id}", "[update_secretcode] The secret_code_to_match is just one letter. This could be unsafe depending on your configuration.");
           }
-      - globals.set:
-          id: ${id}_secret_code_to_match
-          value: !lambda "return new_code;"
-      - logger.log:
-          format: "Updated secret_code_to_match to: %s"
-          args: [ 'id(${id}_secret_code_to_match).c_str()' ]
-          tag: ${id}
-          level: WARN
+          for (char &c : new_code) {
+            if (c != 'L' && c != 'S') {
+              ESP_LOGE("${id}", "[update_secretcode] Invalid character '%c' in the new secret code. Only 'L' and 'S' are allowed. Code was saved, but interpreter won't be able to match this, ever.", c);
+            }
+          }
+          ESP_LOGW("${id}", "Updated secret_code_to_match to: %s", new_code.c_str());
+
     
   - id: handle_press
     then:
