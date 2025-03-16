@@ -1,14 +1,12 @@
 substitutions:
   id: ${id}
   friendly_name: ${name}
-  reset_time: "3000000"
-  short_signal_time: "200000"
-  long_signal_time: "750000"
+  reset_time: "3000000" # microseconds (1s = 1000000 microseconds)
+  short_signal_time: "200000" # microseconds
+  long_signal_time: "750000" # microseconds
   monitored_sensor_id: monitored_sensor
-  script_execute_on_match: dummy_execute_script
-  secret_code_to_match: "" 
-  
-# secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
+  script_execute_on_match: dummy_execute_script # script to execute when the secret code matches
+  secret_code_to_match: "" # secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
 
 globals:
   - id: start_time
@@ -36,20 +34,6 @@ binary_sensor:
     on_release:
       then:
         - script.execute: handle_release
-
-# binary_sensor:
-#   - platform: gpio
-#     pin:
-#       number: GPIO00
-#       # mode: INPUT_PULLUP
-#       inverted: true
-#     name: "Secret Code Switch"
-#     on_press:
-#       then:
-#         - script.execute: handle_press
-#     on_release:
-#       then:
-#         - script.execute: handle_release
 
 script:
   - id: dummy_execute_script
