@@ -49,47 +49,47 @@ script:
       new_code: string
     then:
       - globals.set:
-          id: secret_code_to_match
+          id: ${id}_secret_code_to_match
           value: !lambda "return new_code;"
       - logger.log:
           format: "Updated secret_code_to_match to: %s"
-          args: [ 'id(secret_code_to_match).c_str()' ]
+          args: [ 'id(${id}_secret_code_to_match).c_str()' ]
           tag: ${id}
           level: WARN
   - id: handle_press
     then:
       - lambda: |-
-          if (id(secret_code_to_match).empty()) {
+          if (id(${id}_secret_code_to_match).empty()) {
             ESP_LOGD("${id}", "[handle_press] The secret_code_to_match is empty. Please set a valid secret code to match.");
             return;
           }
           int local_start_time = system_get_time();
           if (local_start_time - id(last_input_time) > ${reset_time}) {
             ESP_LOGI("${id}", "resetting secret code because reset_time has passed");
-            id(secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
+            id(${id}_secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
           }
-          id(start_time) = local_start_time;
+          id(${id}_start_time) = local_start_time;
   - id: handle_release
     then:
       - lambda: |-
-          if (id(secret_code_to_match).empty()) {
+          if (id(${id}_secret_code_to_match).empty()) {
             ESP_LOGD("${id}", "[handle_release] The secret_code_to_match is empty. Please set a valid secret code to match.");
             return;
           }
           int release_time = system_get_time();
-          int press_duration = release_time - id(start_time);
+          int press_duration = release_time - id(${id}_start_time);
           if (press_duration < ${short_signal_time}) {
-            id(secret_code).append("S");  // Short press
+            id(${id}_secret_code).append("S");  // Short press
           } else if (press_duration < ${long_signal_time}) {
-            id(secret_code).append("L");  // Long press
+            id(${id}_secret_code).append("L");  // Long press
           } else {
-            id(secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
+            id(${id}_secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
           }
-          id(last_input_time) = release_time;
+          id(${id}_last_input_time) = release_time;
           ESP_LOGI("${id}", "Press began at: %d, stopped at: %d, duration: %d ms", id(start_time), release_time, press_duration);
           ESP_LOGI("${id}", "Current secret code: %s", id(secret_code).c_str());
-          if (id(secret_code) == id(secret_code_to_match)) {
+          if (id(${id}_secret_code) == id(${id}_secret_code_to_match)) {
             ESP_LOGI("${id}", "SECRET CODE [${secret_code_to_match}] MATCHED!! Executing script ${script_execute_on_match}.");
-            id(secret_code).clear();  // Reset the code after a successful match
+            id(${id}_secret_code).clear();  // Reset the code after a successful match
             id(${script_execute_on_match}).execute();
           }
