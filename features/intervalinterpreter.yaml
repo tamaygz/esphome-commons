@@ -11,22 +11,22 @@ substitutions:
 
 
 globals:
-  - id: start_time
+  - id: ${id}_start_time
     type: int
     restore_value: no
     initial_value: "0"
-  - id: last_input_time
+  - id: ${id}_last_input_time
     type: int
     restore_value: no
     initial_value: "0"
-  - id: secret_code
+  - id: ${id}_secret_code
     type: std::string
     restore_value: no
     initial_value: '""'
-  - id: secret_code_to_match
+  - id: ${id}_secret_code_to_match
     type: std::string
     restore_value: no
-    initial_value: '"${secret_code_to_match}"'
+    initial_value: '"${${id}_secret_code_to_match}"'
 
 binary_sensor:
   - id: !extend ${monitored_sensor_id}
