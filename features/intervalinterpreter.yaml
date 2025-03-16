@@ -59,6 +59,10 @@ script:
   - id: handle_press
     then:
       - lambda: |-
+          if (id(secret_code_to_match).empty()) {
+            ESP_LOGD("secret_code", "[handle_press] The secret_code_to_match is empty. Please set a valid secret code to match.");
+            return;
+          }
           int local_start_time = system_get_time();
           if (local_start_time - id(last_input_time) > ${reset_time}) {
             ESP_LOGI("secret_code", "resetting secret code because reset_time has passed");
@@ -68,6 +72,10 @@ script:
   - id: handle_release
     then:
       - lambda: |-
+          if (id(secret_code_to_match).empty()) {
+            ESP_LOGD("secret_code", "[handle_release] The secret_code_to_match is empty. Please set a valid secret code to match.");
+            return;
+          }
           int release_time = system_get_time();
           int press_duration = release_time - id(start_time);
           if (press_duration < ${short_signal_time}) {
