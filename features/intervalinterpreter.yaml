@@ -86,7 +86,7 @@ script:
             id(${id}_secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
           }
           id(${id}_last_input_time) = release_time;
-          ESP_LOGI("${id}", "Press began at: %d, stopped at: %d, duration: %d ms", id(start_time), release_time, press_duration);
+          ESP_LOGI("${id}", "Press began at: %d, stopped at: %d, duration: %d ms", id(${id}_start_time), release_time, press_duration);
           ESP_LOGI("${id}", "Current secret code: %s", id(secret_code).c_str());
           if (id(${id}_secret_code) == id(${id}_secret_code_to_match)) {
             ESP_LOGI("${id}", "SECRET CODE [${secret_code_to_match}] MATCHED!! Executing script ${script_execute_on_match}.");
