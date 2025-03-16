@@ -64,7 +64,7 @@ script:
             return;
           }
           int local_start_time = system_get_time();
-          if (local_start_time - id(last_input_time) > ${reset_time}) {
+          if (local_start_time - id(${id}_last_input_time) > ${reset_time}) {
             ESP_LOGI("${id}", "resetting secret code because reset_time has passed");
             id(${id}_secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
           }
