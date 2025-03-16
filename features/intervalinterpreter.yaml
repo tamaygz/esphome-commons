@@ -1,12 +1,14 @@
 substitutions:
-  id: ${id}
-  friendly_name: ${name}
+  id: "interpreter"
+  friendly_name: "Interval Interpreter"
   reset_time: "3000000" # microseconds (1s = 1000000 microseconds)
   short_signal_time: "200000" # microseconds
   long_signal_time: "750000" # microseconds
   monitored_sensor_id: monitored_sensor
   script_execute_on_match: dummy_execute_script # script to execute when the secret code matches
   secret_code_to_match: "" # secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
+
+
 
 globals:
   - id: start_time
@@ -40,6 +42,18 @@ script:
     then:
       - logger.log:
           format: "SECRET CODE MATCHED!! No script was executed but the dummy instead."
+          tag: ${id}
+          level: WARN
+  - id: {$id}_update_secretcode
+    parameters:
+      new_code: string
+    then:
+      - globals.set:
+          id: secret_code_to_match
+          value: !lambda "return new_code;"
+      - logger.log:
+          format: "Updated secret_code_to_match to: %s"
+          args: [ 'id(secret_code_to_match).c_str()' ]
           tag: ${id}
           level: WARN
   - id: handle_press
