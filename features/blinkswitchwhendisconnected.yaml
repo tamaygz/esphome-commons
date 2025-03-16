@@ -1,0 +1,18 @@
+substitutions:
+  id: ${id}
+  friendly_name: ${name}
+  blink_switch_id: dummy_switch_id
+  blink_interval: "500ms"
+
+interval:
+  - interval: ${blink_interval}
+    then:
+      - switch.toggle: ${blink_switch_id}
+
+wifi: !extend
+  on_disconnect:
+    then:
+      - switch.turn_on: ${blink_switch_id}
+  on_connect:
+    then:
+      - switch.turn_off: ${blink_switch_id}

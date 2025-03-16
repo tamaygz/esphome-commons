@@ -4,25 +4,27 @@ substitutions:
   relay_pin: GPIO0
   relay_timer: "off" #on or off, when on, switch turns back off after interval
   relay_timer_interval: "3000" #value in ms
-  
+  relay_icon: "mdi:toggle-switch-variant-off"
+
 switch:
-- platform: gpio
-  id: ${relay_id}
-  name: "${relay_name}"
-  pin: ${relay_pin}
-  inverted: true
-  on_turn_on:
-    - logger.log: 
-        format: "${relay_id} Switch Turned On!"
-        tag: ${relay_id}
-    - if:
-        condition:
-          - lambda: |-
-                  return std::string("${relay_timer}") == "on";
-        then:
-          - delay: ${relay_timer_interval}ms
-          - switch.turn_off: ${relay_id}
-  on_turn_off:
-    - logger.log: 
-        format: "$relay_id Switch Turned Off!"
-        tag: ${relay_id}
+  - platform: gpio
+    id: ${relay_id}
+    name: "${relay_name}"
+    pin: ${relay_pin}
+    inverted: true
+    icon: ${relay_icon}
+    on_turn_on:
+      - logger.log:
+          format: "${relay_id} Turned On!"
+          tag: ${relay_id}
+      - if:
+          condition:
+            - lambda: |-
+                return std::string("${relay_timer}") == "on";
+          then:
+            - delay: ${relay_timer_interval}ms
+            - switch.turn_off: ${relay_id}
+    on_turn_off:
+      - logger.log:
+          format: "${relay_id} Turned Off!"
+          tag: ${relay_id}

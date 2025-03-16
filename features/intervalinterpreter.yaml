@@ -4,7 +4,7 @@ substitutions:
   reset_time: "3000000"
   short_signal_time: "200000"
   long_signal_time: "750000"
-  monitored_switch_id: monitored_switch
+  monitored_sensor_id: monitored_sensor
 
 globals:
   - id: start_time
@@ -21,18 +21,27 @@ globals:
     initial_value: '""'
 
 binary_sensor:
-  - platform: gpio
-    pin:
-      number: GPIO00
-      # mode: INPUT_PULLUP
-      inverted: true
-    name: "Secret Code Switch"
+  - id: !extend ${monitored_sensor_id}
     on_press:
       then:
         - script.execute: handle_press
     on_release:
       then:
         - script.execute: handle_release
+
+# binary_sensor:
+#   - platform: gpio
+#     pin:
+#       number: GPIO00
+#       # mode: INPUT_PULLUP
+#       inverted: true
+#     name: "Secret Code Switch"
+#     on_press:
+#       then:
+#         - script.execute: handle_press
+#     on_release:
+#       then:
+#         - script.execute: handle_release
 
 script:
   - id: handle_press
