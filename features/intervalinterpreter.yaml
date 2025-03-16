@@ -5,6 +5,8 @@ substitutions:
   short_signal_time: "200000"
   long_signal_time: "750000"
   monitored_sensor_id: monitored_sensor
+  script_execute_on_match: dummy_execute_script
+  secret_code_to_match: "" #use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
 
 globals:
   - id: start_time
@@ -19,6 +21,10 @@ globals:
     type: std::string
     restore_value: no
     initial_value: '""'
+  - id: secret_code_to_match
+    type: std::string
+    restore_value: no
+    initial_value: "${secret_code_to_match}"
 
 binary_sensor:
   - id: !extend ${monitored_sensor_id}
@@ -44,6 +50,12 @@ binary_sensor:
 #         - script.execute: handle_release
 
 script:
+  - id: dummy_execute_script
+    then:
+      - logger.log:
+          format: "SECRET CODE MATCHED!! No script was executed but the dummy instead."
+          tag: ${id}
+          level: WARN
   - id: handle_press
     then:
       - lambda: |-
@@ -53,7 +65,6 @@ script:
             id(secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
           }
           id(start_time) = local_start_time;
-
   - id: handle_release
     then:
       - lambda: |-
@@ -69,3 +80,8 @@ script:
           id(last_input_time) = release_time;
           ESP_LOGI("secret_code", "Press began at: %d, stopped at: %d, duration: %d ms", id(start_time), release_time, press_duration);
           ESP_LOGI("secret_code", "Current secret code: %s", id(secret_code).c_str());
+          if (id(secret_code) == id(secret_code_to_match)) {
+            ESP_LOGI("secret_code", "SECRET CODE [${secret_code_to_match}] MATCHED!! Executing script ${script_execute_on_match}.");
+            id(secret_code).clear();  // Reset the code after a successful match
+            script.execute(id("${script_execute_on_match}"));
+          }
