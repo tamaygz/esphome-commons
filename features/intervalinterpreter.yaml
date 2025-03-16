@@ -91,5 +91,5 @@ script:
           if (id(secret_code) == id(secret_code_to_match)) {
             ESP_LOGI("secret_code", "SECRET CODE [${secret_code_to_match}] MATCHED!! Executing script ${script_execute_on_match}.");
             id(secret_code).clear();  // Reset the code after a successful match
-            id(${script_execute_on_match}).turn_on();
+            id(${script_execute_on_match}).execute();
           }
