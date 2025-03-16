@@ -26,7 +26,7 @@ globals:
   - id: secret_code_to_match
     type: std::string
     restore_value: no
-    initial_value: "${secret_code_to_match}"
+    initial_value: '"${secret_code_to_match}"'
 
 binary_sensor:
   - id: !extend ${monitored_sensor_id}
