@@ -6,7 +6,9 @@ substitutions:
   long_signal_time: "750000"
   monitored_sensor_id: monitored_sensor
   script_execute_on_match: dummy_execute_script
-  secret_code_to_match: "" #use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
+  secret_code_to_match: "" 
+  
+# secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
 
 globals:
   - id: start_time
