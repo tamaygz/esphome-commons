@@ -44,7 +44,7 @@ script:
           format: "SECRET CODE MATCHED!! No script was executed but the dummy instead."
           tag: ${id}
           level: WARN
-  - id: {$id}_update_secretcode
+  - id: "{$id}_update_secretcode"
     parameters:
       new_code: string
     then:
