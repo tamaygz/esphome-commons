@@ -15,7 +15,7 @@ wifi:
             wifi.connected: false
           then:
             - switch.toggle: ${blink_switch_id}
-            - delay: ${blink_interval}
+            - delay: "${blink_interval}"
   on_connect:
     then:
       - switch.turn_off: ${blink_switch_id}
