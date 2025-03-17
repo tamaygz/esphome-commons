@@ -8,8 +8,6 @@ substitutions:
   script_execute_on_match: dummy_execute_script # script to execute when the secret code matches
   secret_code_to_match: "" # secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
 
-
-
 globals:
   - id: ${id}_start_time
     type: int
