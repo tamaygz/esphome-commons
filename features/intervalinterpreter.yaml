@@ -64,8 +64,6 @@ script:
             }
           }
           ESP_LOGW("${id}", "Updated secret_code_to_match to: %s", new_code.c_str());
-
-    
   - id: handle_press
     then:
       - lambda: |-
