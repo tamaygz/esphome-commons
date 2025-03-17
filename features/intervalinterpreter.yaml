@@ -5,7 +5,7 @@ substitutions:
   short_signal_time: "200000" # microseconds
   long_signal_time: "750000" # microseconds
   monitored_sensor_id: monitored_sensor
-  script_execute_on_match: dummy_execute_script # script to execute when the secret code matches
+  script_execute_on_match: ${id}_dummy_execute_script # script to execute when the secret code matches
   secret_code_to_match: "" # secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
 
 globals:
@@ -36,7 +36,7 @@ binary_sensor:
         - script.execute: ${id}_handle_release
 
 script:
-  - id: dummy_execute_script
+  - id: ${id}_dummy_execute_script
     then:
       - logger.log:
           format: "SECRET CODE MATCHED!! No script was executed but the dummy instead."
