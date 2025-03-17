@@ -4,15 +4,21 @@ substitutions:
   blink_switch_id: dummy_switch_id
   blink_interval: "500ms"
 
-interval:
-  - interval: ${blink_interval}
-    then:
-      - switch.toggle: ${blink_switch_id}
-
-wifi: !extend
-  on_disconnect:
-    then:
-      - switch.turn_on: ${blink_switch_id}
-  on_connect:
-    then:
-      - switch.turn_off: ${blink_switch_id}
+  wifi:
+    on_disconnect:
+      then:
+        - logger.log:
+            level: DEBUG
+            format: "Wifi disconnected, starting to blink ${blink_switch_id}"
+        - while:
+            condition:
+              wifi.connected: false
+            then:
+              - switch.toggle: ${blink_switch_id}
+              - delay: ${blink_interval}
+    on_connect:
+      then:
+        - switch.turn_off: ${blink_switch_id}
+        - logger.log:
+            level: DEBUG
+            format: "Blinking will now be disabled because WiFi has reconnected"
