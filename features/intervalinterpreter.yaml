@@ -30,10 +30,10 @@ binary_sensor:
   - id: !extend ${monitored_sensor_id}
     on_press:
       then:
-        - script.execute: handle_press
+        - script.execute: ${id}_handle_press
     on_release:
       then:
-        - script.execute: handle_release
+        - script.execute: ${id}_handle_release
 
 script:
   - id: dummy_execute_script
@@ -47,8 +47,8 @@ script:
       new_code: string
     then:
       - globals.set:
-            id: ${id}_secret_code_to_match
-            value: !lambda "return new_code;"
+          id: ${id}_secret_code_to_match
+          value: !lambda "return new_code;"
       - lambda: |-
           if (new_code.empty()) {
             ESP_LOGE("${id}", "[update_secretcode] The new secret code is empty. This will stop the intervalinterpreter from working.");
@@ -62,7 +62,7 @@ script:
             }
           }
           ESP_LOGW("${id}", "Updated secret_code_to_match to: %s", new_code.c_str());
-  - id: handle_press
+  - id: ${id}_handle_press
     then:
       - lambda: |-
           if (id(${id}_secret_code_to_match).empty()) {
@@ -75,7 +75,7 @@ script:
             id(${id}_secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
           }
           id(${id}_start_time) = local_start_time;
-  - id: handle_release
+  - id: ${id}_handle_release
     then:
       - lambda: |-
           if (id(${id}_secret_code_to_match).empty()) {
