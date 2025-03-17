@@ -48,9 +48,9 @@ script:
     parameters:
       new_code: string
     then:
-     - globals.set:
-          id: ${id}_secret_code_to_match
-          value: !lambda "return new_code;"
+      - globals.set:
+            id: ${id}_secret_code_to_match
+            value: !lambda "return new_code;"
       - lambda: |-
           if (new_code.empty()) {
             ESP_LOGE("${id}", "[update_secretcode] The new secret code is empty. This will stop the intervalinterpreter from working.");
