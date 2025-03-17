@@ -22,3 +22,6 @@ wifi:
       - logger.log:
           level: DEBUG
           format: "Blinking will now be disabled because WiFi has reconnected"
+
+
+
