@@ -12,7 +12,7 @@ wifi:
           format: "Wifi disconnected, starting to blink ${blink_switch_id}"
       - while:
           condition:
-            wifi.connected: false
+            - wifi.connected: false
           then:
             - switch.toggle: ${blink_switch_id}
             - delay: "${blink_interval}"
