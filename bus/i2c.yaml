@@ -1,7 +1,7 @@
 substitutions:
-    bus_id: ${id}_bus_a
-    pin_sda: TX
-    pin_scl: RX
+  bus_id: ${id}_bus_a
+  pin_sda: TX
+  pin_scl: RX
 
 
 i2c:
