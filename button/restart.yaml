@@ -1,5 +1,5 @@
 button:
   # Restart Button
   - platform: restart
-    id: ${name}_restart
+    id: ${id}_restart
     name: ${friendly_name} Restart

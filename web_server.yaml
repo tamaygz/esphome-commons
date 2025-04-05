@@ -1,5 +1,9 @@
+substitutions:
+  web_user: admin
+  web_password: replaceme123
+
 web_server:
   auth:
-    username: admin
-    password: !secret web_password
+    username: ${web_user}
+    password: ${web_password}
   local: true

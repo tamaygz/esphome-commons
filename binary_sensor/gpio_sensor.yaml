@@ -1,5 +1,5 @@
 substitutions:
-  sensor_id: "${name}_gpio_sensor"
+  sensor_id: "${id}_gpio_sensor"
   sensor_name: "${friendly_name} GPIO Sensor"
   sensor_pin: GPIO02
   signal_start_callback_script: signal_start_dummy

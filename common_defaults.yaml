@@ -1,5 +1,5 @@
 substitutions:
-  name: my_esp_device
+  id: my_esp_device
   friendly_name: My ESP Device
   version: dev
   log_level: none

@@ -28,15 +28,15 @@ text_sensor:
   - platform: wifi_info
     ip_address:
       id: wifi_ip_address
-      name: ${name} IP Address
+      name: ${id} IP Address
       icon: "mdi:wan"
       entity_category: "diagnostic"
     ssid:
       id: wifi_ssid
-      name: ${name} SSID
+      name: ${id} SSID
       entity_category: "diagnostic"
     bssid:
       id: wifi_bssid
-      name: ${name} BSSID
+      name: ${id} BSSID
       icon: "mdi:wan"
       entity_category: "diagnostic"

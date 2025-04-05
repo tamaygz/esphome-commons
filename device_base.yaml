@@ -1,11 +1,11 @@
 <<: !include common_defaults.yaml
 
 esphome:
-  name: ${name}
+  id: ${id}
   friendly_name: ${friendly_name}
   name_add_mac_suffix: false
   project:
-    name: esphome.${name}
+    name: esphome.${id}
     version: ${version}
 
 ${platform}:
