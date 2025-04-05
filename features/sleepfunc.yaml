@@ -33,7 +33,7 @@ number:
   - platform: template
     id: ${id}_delay_minutes
     name: ${friendly_name} delay minutes
-    step: 1
+    step: 10
     min_value: 1
     max_value: 1440
     initial_value: 30
