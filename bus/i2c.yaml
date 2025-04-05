@@ -8,4 +8,4 @@ i2c:
   sda: ${pin_sda}
   scl: ${pin_scl}
   scan: true
-  id: bus_a
+  id: ${bus_id}
