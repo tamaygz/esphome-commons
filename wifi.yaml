@@ -8,7 +8,7 @@ wifi:
       password: !secret wifi_password
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "${friendly_name} Fallback Hotspot"
+    ssid: "${id} Fallback Hotspot"
     password: !secret hotspot_password
 
 ota:
