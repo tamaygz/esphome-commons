@@ -60,7 +60,7 @@ script:
     then:
       - while:
           condition:
-            switch.is_on: ${id}_sleepmode_engaged
+            switch.is_on: ${id}_engaged
           then:
             - if:
                 condition:
