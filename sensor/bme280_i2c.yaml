@@ -2,7 +2,7 @@ substitutions:
   id: ${id}_bme280
   friendly_name: "${friendly_name} BME280"
   i2c_bus_id: ${id}_bus_a
-  i2c_address: 0x76
+  i2c_address: "0x76"
   update_interval: 60s
 
 # Description: This file contains the configuration for the BME280 sensor connected via I2C.
