@@ -43,7 +43,7 @@ switch:
     on_turn_off:
       - script.stop: maxactive_watchdog
   - platform: template
-    name: Limit Active Time (maxhours)
+    name: Limit Active Time
     id: limit_active_time
     optimistic: true
     entity_category: config
