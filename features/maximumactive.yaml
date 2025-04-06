@@ -45,6 +45,7 @@ switch:
   - platform: template
     name: Limit Active Time
     id: limit_active_time
+    icon: mdi:timer-alert-outline
     optimistic: true
     entity_category: config
     restore_mode: RESTORE_DEFAULT_OFF
