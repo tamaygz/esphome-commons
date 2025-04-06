@@ -2,7 +2,7 @@ substitutions:
   sensor_id: "${id}_gpio_sensor"
   sensor_name: "${friendly_name} GPIO Sensor"
   sensor_pin: GPIO02
-  sensor_icon: "mdi:leak"
+  sensor_device_class: none
   signal_start_callback_script: signal_start_dummy
   signal_end_callback_script: signal_stop_dummy
 
@@ -10,7 +10,7 @@ binary_sensor:
   - platform: gpio
     id: ${sensor_id}
     name: "${sensor_name}"
-    icon: ${sensor_icon}
+    device_class: ${sensor_device_class}
     pin:
       number: ${sensor_pin}
       mode: INPUT_PULLUP
