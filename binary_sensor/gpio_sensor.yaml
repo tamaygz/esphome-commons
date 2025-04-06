@@ -1,6 +1,6 @@
 substitutions:
-  sensor_id: "${id}_gpio_sensor"
-  sensor_name: "${friendly_name} GPIO Sensor"
+  sensor_id: "gpio_sensor"
+  sensor_name: "GPIO Sensor"
   sensor_pin: GPIO02
   sensor_device_class: none
   signal_start_callback_script: signal_start_dummy

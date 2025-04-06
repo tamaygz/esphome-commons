@@ -1,7 +1,7 @@
 # feature that offers a winddown (go to sleep) function
 substitutions:
-  sleep_id: ${id}_sleep
-  sleep_friendly_name: ${friendly_name} SleepMode
+  sleep_id: sleepmode
+  sleep_friendly_name: Sleep Mode
   sleepmode_engage_callback_script: ${sleep_id}_dummy_script
 
 globals:

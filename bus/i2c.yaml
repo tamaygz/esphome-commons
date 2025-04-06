@@ -1,5 +1,5 @@
 substitutions:
-  bus_id: ${id}_bus_a
+  bus_id: bus_a
   pin_sda: TX
   pin_scl: RX
 

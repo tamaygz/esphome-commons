@@ -19,8 +19,8 @@ captive_portal:
 
 sensor:
   - platform: wifi_signal
-    name: "RSSI"
-    id: sensor_rssi
+    name: "WIFI RSSI"
+    id: wifi_sensor_rssi
     update_interval: 60s
     entity_category: "diagnostic"
 
@@ -28,15 +28,15 @@ text_sensor:
   - platform: wifi_info
     ip_address:
       id: wifi_ip_address
-      name: ${id} IP Address
+      name: WIIF IP Address
       icon: "mdi:wan"
       entity_category: "diagnostic"
     ssid:
       id: wifi_ssid
-      name: ${id} SSID
+      name: WIFI SSID
       entity_category: "diagnostic"
     bssid:
       id: wifi_bssid
-      name: ${id} BSSID
+      name: WIFI BSSID
       icon: "mdi:wan"
       entity_category: "diagnostic"

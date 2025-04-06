@@ -1,6 +1,6 @@
 substitutions:
-  relay_id: "${id}_relay"
-  relay_name: "${friendly_name} Relay"
+  relay_id: "relay"
+  relay_name: "Relay"
   relay_pin: GPIO0
   relay_timer: "off" #on or off, when on, switch turns back off after interval
   relay_timer_interval: "3000" #value in ms

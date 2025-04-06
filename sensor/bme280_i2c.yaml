@@ -1,6 +1,6 @@
 substitutions:
-  id: ${id}_bme280
-  friendly_name: "${friendly_name} BME280"
+  id: bme280
+  friendly_name: "BME 280"
   i2c_bus_id: ${id}_bus_a
   i2c_address: "0x76"
   update_interval: "60s"
@@ -10,11 +10,11 @@ sensor:
   - platform: bme280_i2c
     i2c_id: ${i2c_bus_id}
     temperature:
-      name: ${friendly_name} Temperature
+      name: Temperature
       oversampling: 16x
     pressure:
-      name: ${friendly_name} Pressure
+      name: Pressure
     humidity:
-      name: ${friendly_name} Humidity
+      name: Humidity
     address: ${i2c_address}
     update_interval: ${update_interval}
