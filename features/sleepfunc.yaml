@@ -12,7 +12,7 @@ globals:
 
 switch:
   - platform: template
-    name: ${sleep_friendly_name} Engaged
+    name: ${sleep_friendly_name}
     id: ${sleep_id}_engaged
     icon: mdi:sleep
     optimistic: true
