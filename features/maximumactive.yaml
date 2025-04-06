@@ -38,8 +38,8 @@ switch:
             - lambda: |-
                 int delay = (int)id(max_time_active).state;
                 time_t target = (id(maxactive_last_activation) + (delay * 60));
-                ESP_LOGD("sleep", "MAXA mode engaged at %d", id(ha_time).now());
-                ESP_LOGD("sleep", "After delay of %dminutes switch will be deactivated at %d ..", delay, (int) target );
+                ESP_LOGI("LIMITACTIVE", "active limitation mode engaged at %d", id(ha_time).now());
+                ESP_LOGI("LIMITACTIVE", "After delay of %dminutes switch will be deactivated at %d ..", delay, (int) target );
     on_turn_off:
       - script.stop: maxactive_watchdog
   - platform: template
@@ -65,6 +65,9 @@ script:
                 condition:
                   - lambda: 'return ( id(ha_time).now().timestamp >= (id(maxactive_last_activation) + ((int)id(max_time_active).state * 60)) );'
                 then:
-                  - logger.log: max active time reached, turning off
+                  - logger.log: 
+                      tag: LIMITACTIVE
+                      level: info
+                      format: max active time reached, turning off
                   - switch.turn_off: ${monitored_switch}
             - delay: 5 min
