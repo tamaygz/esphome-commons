@@ -33,12 +33,12 @@ switch:
 number:
   - platform: template
     id: ${sleep_id}_delay_minutes
-    name: ${sleep_friendly_name} Delay (min)
+    name: ${sleep_friendly_name} Delay
     # icon: mdi:timer-cog-outline
     unit_of_measurement: min
     device_class: duration
-    step: 10
-    min_value: 1
+    step: 5
+    min_value: 5
     max_value: 1440
     initial_value: 30
     mode: box
@@ -71,4 +71,4 @@ script:
                   - lambda: 'return ( id(ha_time).now().timestamp >= (id(${sleep_id}_last_engaged) + ((int)id(${sleep_id}_delay_minutes).state * 60)) );'
                 then:
                   - script.execute: ${sleep_id}_execute_sleep_function
-            - delay: 10 min
+            - delay: 5 min

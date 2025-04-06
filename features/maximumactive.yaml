@@ -10,13 +10,15 @@ globals:
 # inputs
 number:
   - platform: template
-    name: "Maximum ON time (hours)"
-    id: "max_hours_active"
-    initial_value: 2
+    name: "Maximum ON time"
+    id: "max_time_active"
+    unit_of_measurement: min
+    device_class: duration
+    initial_value: 30
     optimistic: true
-    step: 1
-    min_value: 1
-    max_value: 100
+    step: 5
+    min_value: 5
+    max_value: 1440
     mode: box
     entity_category: config
     restore_value: true
@@ -34,10 +36,10 @@ switch:
             switch.is_on: limit_active_time
           then:
             - lambda: |-
-                int delay = (int)id(max_hours_active).state;
-                time_t target = (id(maxactive_last_activation) + (delay * 60 * 60));
+                int delay = (int)id(max_time_active).state;
+                time_t target = (id(maxactive_last_activation) + (delay * 60));
                 ESP_LOGD("sleep", "MAXA mode engaged at %d", id(ha_time).now());
-                ESP_LOGD("sleep", "After delay of %dhours switch will be deactivated at %d ..", delay, (int) target );
+                ESP_LOGD("sleep", "After delay of %dminutes switch will be deactivated at %d ..", delay, (int) target );
     on_turn_off:
       - script.stop: maxactive_watchdog
   - platform: template
@@ -60,8 +62,8 @@ script:
           then:
             - if:
                 condition:
-                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(maxactive_last_activation) + ((int)id(max_hours_active).state * 60 * 60)) );'
+                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(maxactive_last_activation) + ((int)id(max_time_active).state * 60)) );'
                 then:
                   - logger.log: max active time reached, turning off
                   - switch.turn_off: ${monitored_switch}
-            - delay: 10 min
+            - delay: 5 min
