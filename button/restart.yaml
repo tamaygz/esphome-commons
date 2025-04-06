@@ -1,6 +1,6 @@
 button:
   # Restart Button
   - platform: restart
-    id: restart
+    id: btn_restart
     name: Restart
     device_class: "restart"
