@@ -4,6 +4,8 @@ substitutions:
   sensor_pin: GPIO02
   motion_start_callback_script: signal_start_dummy
   motion_end_callback_script: signal_stop_dummy
+  mtime_on: "250ms"
+  mtime_off: "3s"
 
 packages:
   motion_sensor: !include 
@@ -22,6 +24,6 @@ binary_sensor:
       inverted: false
     filters:
       - delayed_on_off: 
-          time_on: 250ms
-          time_off: 2s
+          time_on: ${mtime_on}
+          time_off: ${mtime_off}
 
