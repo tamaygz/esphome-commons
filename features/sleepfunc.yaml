@@ -14,6 +14,7 @@ switch:
   - platform: template
     name: ${sleep_friendly_name} Engaged
     id: ${sleep_id}_engaged
+    icon: mdi:sleep
     optimistic: true
     on_turn_off:
       - script.stop: ${sleep_id}_sleepmode_check
@@ -33,6 +34,7 @@ number:
   - platform: template
     id: ${sleep_id}_delay_minutes
     name: ${sleep_friendly_name} delay minutes
+    icon: mdi:timer-cog-outline
     step: 10
     min_value: 1
     max_value: 1440
