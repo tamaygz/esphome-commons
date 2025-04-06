@@ -68,6 +68,6 @@ script:
                   - logger.log: 
                       tag: LIMITACTIVE
                       level: info
-                      format: max active time reached, turning off
+                      format: max active time reached, turning off ${monitored_switch}
                   - switch.turn_off: ${monitored_switch}
             - delay: 5 min
