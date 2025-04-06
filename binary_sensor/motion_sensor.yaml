@@ -1,0 +1,27 @@
+substitutions:
+  sensor_id: "motion_sensor"
+  sensor_name: "Motion Sensor"
+  sensor_pin: GPIO02
+  motion_start_callback_script: signal_start_dummy
+  motion_end_callback_script: signal_stop_dummy
+
+packages:
+  motion_sensor: !include 
+    file: gpio_sensor.yaml
+    vars:
+      sensor_id: ${sensor_id}
+      sensor_name: ${sensor_name}
+      sensor_pin: ${sensor_pin}
+      sensor_device_class: motion
+      signal_start_callback_script: ${motion_start_callback_script}
+      signal_end_callback_script: ${motion_end_callback_script}
+
+binary_sensor:
+  - id: !extend ${sensor_id}
+    pin:
+      inverted: false
+    filters:
+      - delayed_on_off: 
+          on_time: 50ms
+          off_time: 1s
+
