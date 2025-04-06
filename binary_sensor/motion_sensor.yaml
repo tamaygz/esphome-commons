@@ -22,6 +22,6 @@ binary_sensor:
       inverted: false
     filters:
       - delayed_on_off: 
-          time_on: 200ms
-          time_off: 1s
+          time_on: 250ms
+          time_off: 2s
 
