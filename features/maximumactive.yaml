@@ -42,6 +42,10 @@ switch:
                 ESP_LOGI("LIMITACTIVE", "After delay of %dminutes switch will be deactivated at %d ..", delay, (int) target );
     on_turn_off:
       - script.stop: maxactive_watchdog
+      - logger.log: 
+          tag: LIMITACTIVE
+          level: info
+          format: ${monitored_switch} turned off, stopping time limitation watchdog.
   - platform: template
     name: Limit Active Time
     id: limit_active_time
