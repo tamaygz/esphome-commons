@@ -10,14 +10,14 @@ sensor:
   - platform: bme280_i2c
     i2c_id: ${i2c_bus_id}
     temperature:
-      id: ${id}_temperature
+      id: ${sensor_id}_temperature
       name: Temperature
       oversampling: 16x
     pressure:
-      id: ${id}_pressure
+      id: ${sensor_id}_pressure
       name: Pressure
     humidity:
-      id: ${id}_humidity
+      id: ${sensor_id}_humidity
       name: Humidity
     address: ${i2c_address}
     update_interval: ${update_interval}
