@@ -1,38 +1,38 @@
 # feature that offers a winddown (go to sleep) function
 substitutions:
-  id: ${id}_sleep
-  friendly_name: ${friendly_name} SleepMode
-  sleepmode_engage_callback_script: ${id}_dummy_script
+  sleep_id: ${id}_sleep
+  sleep_friendly_name: ${friendly_name} SleepMode
+  sleepmode_engage_callback_script: ${sleep_id}_dummy_script
 
 globals:
-  - id: ${id}_last_engaged
+  - id: ${sleep_id}_last_engaged
     type: time_t
     restore_value: no
     initial_value: '0'
 
 switch:
   - platform: template
-    name: ${friendly_name} Engaged
-    id: ${id}_engaged
+    name: ${sleep_friendly_name} Engaged
+    id: ${sleep_id}_engaged
     optimistic: true
     on_turn_off:
-      - script.stop: ${id}_sleepmode_check
+      - script.stop: ${sleep_id}_sleepmode_check
     on_turn_on:
       - globals.set:
-          id: ${id}_last_engaged
+          id: ${sleep_id}_last_engaged
           value: !lambda "return id(ha_time).now().timestamp;"
       - lambda: |-
-          int delay = (int)id(${id}_delay_minutes).state;
-          time_t target = (id(${id}_last_engaged) + (delay * 60));
+          int delay = (int)id(${sleep_id}_delay_minutes).state;
+          time_t target = (id(${sleep_id}_last_engaged) + (delay * 60));
           ESP_LOGD("sleep", "Sleep mode engaged at %d", id(ha_time).now());
           ESP_LOGD("sleep", "After delay of %dmins device will activate sleep sequence at %d ..", delay, (int) target );
-      - script.stop: ${id}_sleepmode_check
-      - script.execute: ${id}_sleepmode_check
+      - script.stop: ${sleep_id}_sleepmode_check
+      - script.execute: ${sleep_id}_sleepmode_check
 
 number:
   - platform: template
-    id: ${id}_delay_minutes
-    name: ${friendly_name} delay minutes
+    id: ${sleep_id}_delay_minutes
+    name: ${sleep_friendly_name} delay minutes
     step: 10
     min_value: 1
     max_value: 1440
@@ -43,28 +43,28 @@ number:
     optimistic: true
 
 script:
-  - id: ${id}_dummy_script
+  - id: ${sleep_id}_dummy_script
     then:
       - logger.log: 
           format: SLEEPMODE DUMMY SCRIPT EXECUTED. Please pass a script to this package as var to replace this function.
           tag: sleep
-  - id: ${id}_execute_sleep_function
+  - id: ${sleep_id}_execute_sleep_function
     then:
       - logger.log: 
           format: executing sleep function
           tag: sleep
       - lambda: |-
-          id(${id}_engaged).publish_state(false);
+          id(${sleep_id}_engaged).publish_state(false);
       - script.execute: ${sleepmode_engage_callback_script}
-  - id: ${id}_sleepmode_check
+  - id: ${sleep_id}_sleepmode_check
     then:
       - while:
           condition:
-            switch.is_on: ${id}_engaged
+            switch.is_on: ${sleep_id}_engaged
           then:
             - if:
                 condition:
-                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(${id}_last_engaged) + ((int)id(${id}_delay_minutes).state * 60)) );'
+                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(${sleep_id}_last_engaged) + ((int)id(${sleep_id}_delay_minutes).state * 60)) );'
                 then:
-                  - script.execute: ${id}_execute_sleep_function
+                  - script.execute: ${sleep_id}_execute_sleep_function
             - delay: 10 min
