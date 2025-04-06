@@ -33,8 +33,10 @@ switch:
 number:
   - platform: template
     id: ${sleep_id}_delay_minutes
-    name: ${sleep_friendly_name} delay minutes
-    icon: mdi:timer-cog-outline
+    name: ${sleep_friendly_name} Delay (min)
+    # icon: mdi:timer-cog-outline
+    unit_of_measurement: min
+    device_class: duration
     step: 10
     min_value: 1
     max_value: 1440
