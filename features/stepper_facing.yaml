@@ -1,0 +1,1240 @@
+# "Face the target source" for a stepper (see stepper/uln2003.yaml, stepper/a4988.yaml).
+#
+# Registers 0..n *target sources* (features/stepper_target_source.yaml, include it once per source). Whenever a
+# source signals, the stepper turns to the position that was recorded for that source. A source is either
+#   - a motion sensor on this device: wire its callbacks to the scripts of the source
+#       motion_start_callback_script: ${stepper_id}_face_<target_id>      (face the source)
+#       motion_end_callback_script:   ${stepper_id}_release_<target_id>   (signal cleared, optional)
+#   - an external trigger (HA automation, other device, ...): call the API actions / scripts
+#       ${stepper_id}_face_source     with  source: "<target_id>"
+#       ${stepper_id}_release_source  with  source: "<target_id>"          (optional)
+#     in HA: esphome.<node>_${stepper_id}_face_source / _release_source
+#
+# POSITIONS are recorded with the interactive TEACH workflow (also persisted across reboots):
+#   1. 'Teach Start'    -> the stepper moves to the first source (if it was taught before)
+#   2. move the stepper with the move buttons / target number until it faces the source
+#   3. 'Teach Confirm'  -> the current position is stored for that source and the next source is prompted
+#      ('Teach Skip' keeps the stored position of that source, 'Teach Cancel' aborts)
+#   The 'Teach Prompt' text sensor tells which source is currently asked for.
+#   The same is available as API actions ${stepper_id}_teach_start / _teach_confirm / _teach_skip / _teach_cancel.
+#   Single sources can also be recorded with their own 'Record <name> Position' button.
+# While teaching, facing is suspended (and a running facing action is aborted).
+#
+# If 'Face Target Source' is enabled but a source was never taught, nothing moves for that source, a warning is
+# logged on boot and for every blocked trigger, the 'Teach Required' problem sensor turns on and the 'Facing
+# Status' text sensor reports it.
+#
+# FACING ACTION (state machine, text sensor 'Facing State'):
+#   idle -> moving_to_target -> facing_target -> [resuming_idle -> idle]
+#   (+ aborted: somebody else took over the motor (manual move, stop, homing, teaching), disabled: facing switched off)
+#   - Interruptible (default OFF): a signal from another source while the action is running is ignored. The action
+#     is running from the signal until the target is reached or, if 'Return To Idle' is on, until the idle position
+#     is reached. ON: the new signal takes over immediately. A repeated signal of the source that is being faced just
+#     extends the hold time.
+#   - Cooldown (default 0): after the action is done signals are ignored for this long. Fixed (Cooldown Min) or a
+#     random time between Cooldown Min and Cooldown Max (when Max > Min), drawn each time.
+#   - Return To Idle (default OFF): after the target was reached the stepper returns to the idle position.
+#     'Idle Position Mode' selects where that is:
+#       Absolute        the 'Idle Position' number (steps)
+#       Relative        'Idle Offset' steps (signed) relative to the LAST position, i.e. the position the stepper
+#                       had when the facing action started (0 = back where it came from)
+#       Random Relative a random offset between 'Idle Offset Min' and 'Idle Offset Max' (signed, drawn every time)
+#                       relative to the last position
+#     Relative results are limited to the soft limits / position range of the stepper.
+#     'Return Mode' = Motion Clear: when the source is released (<id>_release_source), or
+#     'Return Mode' = Timer: after 'Hold Time Min/Max' (random between both if Max > Min).
+#     'Return Timeout' (0 = off) is a safety limit in both modes, counted from reaching the target, for sources
+#     whose signal never clears. With Return To Idle on the action is only done once the idle position is reached.
+#   - Speeds: 'Face Speed/Acceleration/Deceleration' apply while moving to the target, 'Idle Speed/...' while
+#     resuming the idle position. 0 = use the general Max Speed / Acceleration / Deceleration of the stepper.
+#
+# EVENTS for Home Assistant: every state change and every ignored signal fires the HA event
+# ${stepper_facing_event} (needs 'Allow the device to perform Home Assistant actions' in the ESPHome integration).
+#   event_type: state_changed | signal_ignored
+#   state, previous_state, target (source id), target_name, reason, position
+#   reason: signal, target_reached, released, timer, timeout, manual, idle_reached, manual_override, teach_started,
+#           switch_off, enabled (state changes) | busy, cooldown, not_taught, teaching, homing, disabled (ignored)
+# The same information is available as entities: 'Facing State', 'Facing Target', 'Last Faced Source',
+# 'Facing Cooldown', 'Facing Cooldown Remaining'.
+#
+# Positions are stored in the coordinate system of the stepper: home the stepper (features/stepper_homing.yaml)
+# the same way before using them, and re-teach after changing the home position.
+#
+# Variables (initial values of the HA entities):
+#   stepper_facing_enabled        "ON"|"OFF"  'Face Target Source'
+#   stepper_facing_interruptible  "ON"|"OFF"  'Face Interruptible'
+#   stepper_facing_cooldown_min / _max   seconds
+#   stepper_return_idle           "ON"|"OFF"  'Return To Idle'
+#   stepper_return_mode           "Motion Clear" | "Timer"
+#   stepper_return_hold_min / _max   seconds ('Timer' mode)
+#   stepper_return_timeout        seconds, 0 = off
+#   stepper_idle_mode             "Absolute" | "Relative" | "Random Relative"
+#   stepper_idle_position         steps (Absolute)
+#   stepper_idle_offset           steps, signed (Relative)
+#   stepper_idle_offset_min / _max   steps, signed (Random Relative)
+#   stepper_face_speed / _acceleration / _deceleration   0 = general setting
+#   stepper_idle_speed / _acceleration / _deceleration   0 = general setting
+#   stepper_facing_event          name of the HA event, must start with 'esphome.'
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  stepper_position_min: "-3000"
+  stepper_position_max: "3000"
+  stepper_facing_enabled: "ON"
+  stepper_facing_interruptible: "OFF"
+  stepper_facing_cooldown_min: "0"
+  stepper_facing_cooldown_max: "0"
+  stepper_return_idle: "OFF"
+  stepper_return_mode: "Motion Clear"
+  stepper_return_hold_min: "10"
+  stepper_return_hold_max: "10"
+  stepper_return_timeout: "60"
+  stepper_idle_mode: "Absolute"
+  stepper_idle_position: "0"
+  stepper_idle_offset: "0"
+  stepper_idle_offset_min: "-100"
+  stepper_idle_offset_max: "100"
+  stepper_idle_offset_limit: "100000"
+  stepper_face_speed: "0"
+  stepper_face_acceleration: "0"
+  stepper_face_deceleration: "0"
+  stepper_idle_speed: "0"
+  stepper_idle_acceleration: "0"
+  stepper_idle_deceleration: "0"
+  stepper_facing_event: "esphome.${stepper_id}_facing"
+
+# registry, filled by the source packages (parallel vectors, sorted by their 'order')
+globals:
+  - id: ${stepper_id}_tg_ids
+    type: std::vector<std::string>
+  - id: ${stepper_id}_tg_labels
+    type: std::vector<std::string>
+  - id: ${stepper_id}_tg_orders
+    type: std::vector<int>
+  - id: ${stepper_id}_tg_positions
+    type: std::vector<number::Number*>
+  - id: ${stepper_id}_tg_taught
+    type: std::vector<switch_::Switch*>
+  - id: ${stepper_id}_tg_last_triggered
+    type: std::vector<text_sensor::TextSensor*>
+  # index of the source asked for in the teach workflow, -1 = not teaching
+  - id: ${stepper_id}_teach_index
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: ${stepper_id}_teach_recorded
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # --- facing state machine
+  - id: ${stepper_id}_face_state
+    type: std::string
+    restore_value: no
+    initial_value: '"idle"'
+  - id: ${stepper_id}_face_prev_state
+    type: std::string
+    restore_value: no
+    initial_value: '"idle"'
+  # index of the source that is faced / was faced last, -1 = none
+  - id: ${stepper_id}_face_current
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  # position when the facing action started ('last position' for relative idle positions)
+  - id: ${stepper_id}_face_origin
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # idle position resolved for the current return
+  - id: ${stepper_id}_face_idle_target
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # true from accepting a signal until the facing action is done
+  - id: ${stepper_id}_face_busy
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_face_released
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_face_force_return
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_face_expected
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_face_arrived_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_face_last_signal_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_face_hold_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_face_return_reason
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+  - id: ${stepper_id}_cooldown_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_cooldown_until
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  # scratch values handed from a lambda to the following actions
+  - id: ${stepper_id}_tg_go
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_tg_target
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+esphome:
+  on_boot:
+    - priority: -300
+      then:
+        - lambda: |-
+            id(${stepper_id}_teach_prompt).publish_state("Not teaching");
+            id(${stepper_id}_face_state) = id(${stepper_id}_facing_enabled).state ? "idle" : "disabled";
+            id(${stepper_id}_facing_state_sensor).publish_state(id(${stepper_id}_face_state));
+            id(${stepper_id}_facing_current_target).publish_state("none");
+            size_t n = id(${stepper_id}_tg_ids).size();
+            int missing = 0;
+            for (auto *sw : id(${stepper_id}_tg_taught)) {
+              if (!sw->state) missing++;
+            }
+            if (id(${stepper_id}_facing_enabled).state) {
+              if (n == 0) {
+                ESP_LOGW("${stepper_id}", "Facing is enabled but no target source is registered");
+              } else if (missing > 0) {
+                ESP_LOGW("${stepper_id}", "Facing is enabled but %d of %d target sources were never taught. Run the 'Teach Start' workflow.", missing, (int) n);
+              }
+            }
+
+api:
+  homeassistant_services: true
+  actions:
+    - action: ${stepper_id}_face_source
+      variables:
+        source: string
+      then:
+        - script.execute:
+            id: ${stepper_id}_face_source
+            source: !lambda 'return source;'
+    - action: ${stepper_id}_release_source
+      variables:
+        source: string
+      then:
+        - script.execute:
+            id: ${stepper_id}_release_source
+            source: !lambda 'return source;'
+    - action: ${stepper_id}_face_return_now
+      then:
+        - script.execute: ${stepper_id}_face_return_now
+    - action: ${stepper_id}_teach_start
+      then:
+        - script.execute: ${stepper_id}_teach_start
+    - action: ${stepper_id}_teach_confirm
+      then:
+        - script.execute: ${stepper_id}_teach_confirm
+    - action: ${stepper_id}_teach_skip
+      then:
+        - script.execute: ${stepper_id}_teach_skip
+    - action: ${stepper_id}_teach_cancel
+      then:
+        - script.execute: ${stepper_id}_teach_cancel
+
+switch:
+  - platform: template
+    id: ${stepper_id}_facing_enabled
+    name: "${stepper_name} Face Target Source"
+    icon: mdi:face-recognition
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_${stepper_facing_enabled}
+    entity_category: config
+    on_turn_on:
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_face_state) == "disabled";'
+          then:
+            - script.execute:
+                id: ${stepper_id}_face_set_state
+                state: "idle"
+                reason: "enabled"
+      - lambda: |-
+          for (auto *sw : id(${stepper_id}_tg_taught)) {
+            if (!sw->state) {
+              ESP_LOGW("${stepper_id}", "Facing enabled, but not all target sources were taught. Run the 'Teach Start' workflow.");
+              break;
+            }
+          }
+    on_turn_off:
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_face_state) != "disabled";'
+          then:
+            - script.stop: ${stepper_id}_face_run
+            - script.stop: ${stepper_id}_face_resume_idle
+            - script.execute:
+                id: ${stepper_id}_face_abort
+                state: "disabled"
+                reason: "switch_off"
+  - platform: template
+    id: ${stepper_id}_facing_interruptible
+    name: "${stepper_name} Face Interruptible"
+    icon: mdi:flash-alert-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_${stepper_facing_interruptible}
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_return_idle
+    name: "${stepper_name} Return To Idle"
+    icon: mdi:undo-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_${stepper_return_idle}
+    entity_category: config
+
+select:
+  - platform: template
+    id: ${stepper_id}_idle_mode
+    name: "${stepper_name} Idle Position Mode"
+    icon: mdi:map-marker-radius-outline
+    options:
+      - "Absolute"
+      - "Relative"
+      - "Random Relative"
+    initial_option: "${stepper_idle_mode}"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_return_mode
+    name: "${stepper_name} Return Mode"
+    icon: mdi:timer-cog-outline
+    options:
+      - "Motion Clear"
+      - "Timer"
+    initial_option: "${stepper_return_mode}"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+number:
+  - platform: template
+    id: ${stepper_id}_cooldown_min
+    name: "${stepper_name} Cooldown Min"
+    icon: mdi:timer-sand
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 86400
+    step: 0.5
+    mode: box
+    initial_value: ${stepper_facing_cooldown_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_cooldown_max
+    name: "${stepper_name} Cooldown Max"
+    icon: mdi:timer-sand
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 86400
+    step: 0.5
+    mode: box
+    initial_value: ${stepper_facing_cooldown_max}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_hold_min
+    name: "${stepper_name} Hold Time Min"
+    icon: mdi:timer-outline
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 86400
+    step: 0.5
+    mode: box
+    initial_value: ${stepper_return_hold_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_hold_max
+    name: "${stepper_name} Hold Time Max"
+    icon: mdi:timer-outline
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 86400
+    step: 0.5
+    mode: box
+    initial_value: ${stepper_return_hold_max}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_return_timeout
+    name: "${stepper_name} Return Timeout"
+    icon: mdi:timer-alert-outline
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 86400
+    step: 1
+    mode: box
+    initial_value: ${stepper_return_timeout}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_position
+    name: "${stepper_name} Idle Position"
+    icon: mdi:sleep
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_position}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_offset
+    name: "${stepper_name} Idle Offset"
+    icon: mdi:arrow-left-right
+    unit_of_measurement: "steps"
+    min_value: -${stepper_idle_offset_limit}
+    max_value: ${stepper_idle_offset_limit}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_offset}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_offset_min
+    name: "${stepper_name} Idle Offset Min"
+    icon: mdi:arrow-collapse-left
+    unit_of_measurement: "steps"
+    min_value: -${stepper_idle_offset_limit}
+    max_value: ${stepper_idle_offset_limit}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_offset_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_offset_max
+    name: "${stepper_name} Idle Offset Max"
+    icon: mdi:arrow-collapse-right
+    unit_of_measurement: "steps"
+    min_value: -${stepper_idle_offset_limit}
+    max_value: ${stepper_idle_offset_limit}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_offset_max}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_face_speed
+    name: "${stepper_name} Face Speed"
+    icon: mdi:speedometer
+    unit_of_measurement: "steps/s"
+    min_value: 0
+    max_value: 5000
+    step: 1
+    mode: box
+    initial_value: ${stepper_face_speed}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_face_acceleration
+    name: "${stepper_name} Face Acceleration"
+    icon: mdi:rocket-launch-outline
+    unit_of_measurement: "steps/s²"
+    min_value: 0
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_face_acceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_face_deceleration
+    name: "${stepper_name} Face Deceleration"
+    icon: mdi:car-brake-alert
+    unit_of_measurement: "steps/s²"
+    min_value: 0
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_face_deceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_speed
+    name: "${stepper_name} Idle Speed"
+    icon: mdi:speedometer-slow
+    unit_of_measurement: "steps/s"
+    min_value: 0
+    max_value: 5000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_speed}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_acceleration
+    name: "${stepper_name} Idle Acceleration"
+    icon: mdi:rocket-launch-outline
+    unit_of_measurement: "steps/s²"
+    min_value: 0
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_acceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_deceleration
+    name: "${stepper_name} Idle Deceleration"
+    icon: mdi:car-brake-alert
+    unit_of_measurement: "steps/s²"
+    min_value: 0
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_deceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+button:
+  - platform: template
+    id: ${stepper_id}_btn_set_idle
+    name: "${stepper_name} Set Idle Position Here"
+    icon: mdi:sleep
+    entity_category: config
+    on_press:
+      - lambda: |-
+          auto call = id(${stepper_id}_idle_position).make_call();
+          call.set_value(id(${stepper_id}).current_position);
+          call.perform();
+          ESP_LOGI("${stepper_id}", "Idle position set to %d", id(${stepper_id}).current_position);
+  - platform: template
+    id: ${stepper_id}_btn_goto_idle
+    name: "${stepper_name} Return To Idle Now"
+    icon: mdi:undo-variant
+    on_press:
+      - script.execute: ${stepper_id}_face_return_now
+  - platform: template
+    id: ${stepper_id}_btn_teach_start
+    name: "${stepper_name} Teach Start"
+    icon: mdi:school-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_start
+  - platform: template
+    id: ${stepper_id}_btn_teach_confirm
+    name: "${stepper_name} Teach Confirm"
+    icon: mdi:check-circle-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_confirm
+  - platform: template
+    id: ${stepper_id}_btn_teach_skip
+    name: "${stepper_name} Teach Skip"
+    icon: mdi:skip-next-circle-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_skip
+  - platform: template
+    id: ${stepper_id}_btn_teach_cancel
+    name: "${stepper_name} Teach Cancel"
+    icon: mdi:close-circle-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_cancel
+
+sensor:
+  - platform: template
+    id: ${stepper_id}_sources_taught
+    name: "${stepper_name} Taught Sources"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      int taught = 0;
+      for (auto *sw : id(${stepper_id}_tg_taught)) {
+        if (sw->state) taught++;
+      }
+      return taught;
+  - platform: template
+    id: ${stepper_id}_sources_registered
+    name: "${stepper_name} Registered Sources"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return id(${stepper_id}_tg_ids).size();'
+  - platform: template
+    id: ${stepper_id}_cooldown_remaining
+    name: "${stepper_name} Facing Cooldown Remaining"
+    icon: mdi:timer-sand
+    device_class: duration
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      if (!id(${stepper_id}_cooldown_active)) return 0.0f;
+      int32_t left = (int32_t) (id(${stepper_id}_cooldown_until) - millis());
+      return left > 0 ? left / 1000.0f : 0.0f;
+
+binary_sensor:
+  # on = facing is enabled but at least one source (or all, when none registered) is not taught
+  - platform: template
+    id: ${stepper_id}_teach_required
+    name: "${stepper_name} Teach Required"
+    icon: mdi:alert-circle-outline
+    device_class: problem
+    lambda: |-
+      if (!id(${stepper_id}_facing_enabled).state) return false;
+      if (id(${stepper_id}_tg_ids).empty()) return true;
+      for (auto *sw : id(${stepper_id}_tg_taught)) {
+        if (!sw->state) return true;
+      }
+      return false;
+  - platform: template
+    id: ${stepper_id}_facing_cooldown
+    name: "${stepper_name} Facing Cooldown"
+    icon: mdi:timer-sand
+    entity_category: diagnostic
+    lambda: 'return id(${stepper_id}_cooldown_active) && (int32_t) (id(${stepper_id}_cooldown_until) - millis()) > 0;'
+
+text_sensor:
+  # state machine: idle, moving_to_target, facing_target, resuming_idle, aborted, disabled
+  - platform: template
+    id: ${stepper_id}_facing_state_sensor
+    name: "${stepper_name} Facing State"
+    icon: mdi:state-machine
+  # the source that is currently being faced ('none' while idle)
+  - platform: template
+    id: ${stepper_id}_facing_current_target
+    name: "${stepper_name} Facing Target"
+    icon: mdi:target-account
+  # configuration health
+  - platform: template
+    id: ${stepper_id}_facing_status
+    name: "${stepper_name} Facing Status"
+    icon: mdi:clipboard-check-outline
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      static std::string last;
+      auto &ids = id(${stepper_id}_tg_ids);
+      std::string s;
+      if (id(${stepper_id}_teach_index) >= 0) {
+        s = "Teaching";
+      } else if (!id(${stepper_id}_facing_enabled).state) {
+        s = "Disabled";
+      } else if (ids.empty()) {
+        s = "Error: no target source registered";
+      } else {
+        int missing = 0;
+        for (auto *sw : id(${stepper_id}_tg_taught)) {
+          if (!sw->state) missing++;
+        }
+        if (missing > 0) {
+          s = "Teach required: " + to_string(missing) + " of " + to_string(ids.size()) + " sources not taught";
+        } else {
+          s = "Ready";
+        }
+      }
+      if (s == last) return {};
+      last = s;
+      return s;
+  - platform: template
+    id: ${stepper_id}_facing_target
+    name: "${stepper_name} Last Faced Source"
+    icon: mdi:target-account
+    entity_category: diagnostic
+  - platform: template
+    id: ${stepper_id}_teach_prompt
+    name: "${stepper_name} Teach Prompt"
+    icon: mdi:message-processing-outline
+  - platform: template
+    id: ${stepper_id}_last_taught
+    name: "${stepper_name} Last Taught"
+    icon: mdi:clock-check-outline
+    device_class: timestamp
+    entity_category: diagnostic
+
+script:
+  # --- state + events -----------------------------------------------------
+  - id: ${stepper_id}_face_set_state
+    parameters:
+      state: string
+      reason: string
+    then:
+      - lambda: |-
+          id(${stepper_id}_face_prev_state) = id(${stepper_id}_face_state);
+          id(${stepper_id}_face_state) = state;
+          id(${stepper_id}_facing_state_sensor).publish_state(state);
+          bool active = state == "moving_to_target" || state == "facing_target" || state == "resuming_idle";
+          int i = id(${stepper_id}_face_current);
+          id(${stepper_id}_facing_current_target).publish_state(active && i >= 0 ? id(${stepper_id}_tg_labels)[i] : std::string("none"));
+          ESP_LOGI("${stepper_id}", "Facing state: %s -> %s (%s)", id(${stepper_id}_face_prev_state).c_str(), state.c_str(), reason.c_str());
+      - homeassistant.event:
+          event: ${stepper_facing_event}
+          data:
+            event_type: "state_changed"
+            state: !lambda 'return state;'
+            previous_state: !lambda 'return id(${stepper_id}_face_prev_state);'
+            target: !lambda 'int i = id(${stepper_id}_face_current); return i >= 0 ? id(${stepper_id}_tg_ids)[i] : std::string("");'
+            target_name: !lambda 'int i = id(${stepper_id}_face_current); return i >= 0 ? id(${stepper_id}_tg_labels)[i] : std::string("");'
+            reason: !lambda 'return reason;'
+            position: !lambda 'return to_string(id(${stepper_id}).current_position);'
+
+  - id: ${stepper_id}_face_signal_ignored
+    parameters:
+      source: string
+      reason: string
+    then:
+      - lambda: 'ESP_LOGD("${stepper_id}", "Signal of source %s ignored: %s", source.c_str(), reason.c_str());'
+      - homeassistant.event:
+          event: ${stepper_facing_event}
+          data:
+            event_type: "signal_ignored"
+            state: !lambda 'return id(${stepper_id}_face_state);'
+            previous_state: !lambda 'return id(${stepper_id}_face_prev_state);'
+            target: !lambda 'return source;'
+            target_name: !lambda |-
+              auto &ids = id(${stepper_id}_tg_ids);
+              for (size_t i = 0; i < ids.size(); i++) {
+                if (ids[i] == source) return id(${stepper_id}_tg_labels)[i];
+              }
+              return std::string("");
+            reason: !lambda 'return reason;'
+            position: !lambda 'return to_string(id(${stepper_id}).current_position);'
+
+  # --- facing ---------------------------------------------------------------
+  # entry point of every source: decides if a signal is accepted
+  - id: ${stepper_id}_face_source
+    parameters:
+      source: string
+    then:
+      - lambda: |-
+          // tg_go: true = (re)start facing
+          id(${stepper_id}_tg_go) = false;
+          auto &ids = id(${stepper_id}_tg_ids);
+          int idx = -1;
+          for (size_t i = 0; i < ids.size(); i++) {
+            if (ids[i] == source) { idx = (int) i; break; }
+          }
+          if (idx < 0) {
+            ESP_LOGE("${stepper_id}", "Unknown target source '%s'", source.c_str());
+            return;
+          }
+          auto stamp = id(ha_time).now();
+          if (stamp.is_valid()) {
+            id(${stepper_id}_tg_last_triggered)[idx]->publish_state(stamp.strftime("%Y-%m-%dT%H:%M:%S%z"));
+          }
+          const std::string &label = id(${stepper_id}_tg_labels)[idx];
+          const char *reason = nullptr;
+          const std::string &state = id(${stepper_id}_face_state);
+          bool busy = id(${stepper_id}_face_busy);
+          if (!id(${stepper_id}_facing_enabled).state) {
+            reason = "disabled";
+          } else if (id(${stepper_id}_teach_index) >= 0) {
+            reason = "teaching";
+          } else if (id(${stepper_id}_homing_phase) != 0) {
+            reason = "homing";
+          } else if (!id(${stepper_id}_tg_taught)[idx]->state) {
+            reason = "not_taught";
+            ESP_LOGW("${stepper_id}", "Target source '%s' was never taught, not moving. Run the 'Teach Start' workflow.", label.c_str());
+          } else if (busy && id(${stepper_id}_face_current) == idx && (state == "moving_to_target" || state == "facing_target")) {
+            // same source again: no new move, the hold time just starts over
+            id(${stepper_id}_face_last_signal_ms) = millis();
+            id(${stepper_id}_face_released) = false;
+            ESP_LOGD("${stepper_id}", "'%s' signaled again, hold time extended", label.c_str());
+            return;
+          } else if (busy && !id(${stepper_id}_facing_interruptible).state) {
+            reason = "busy";
+          } else if (!busy && id(${stepper_id}_cooldown_active) && (int32_t) (id(${stepper_id}_cooldown_until) - millis()) > 0) {
+            reason = "cooldown";
+          }
+          if (reason != nullptr) {
+            id(${stepper_id}_face_signal_ignored).execute(source, std::string(reason));
+            return;
+          }
+          id(${stepper_id}_cooldown_active) = false;
+          if (!busy) id(${stepper_id}_face_origin) = id(${stepper_id}).current_position;
+          id(${stepper_id}_face_busy) = true;
+          id(${stepper_id}_idle_movement_priority) |= 1;
+          id(${stepper_id}_face_current) = idx;
+          id(${stepper_id}_face_released) = false;
+          id(${stepper_id}_face_force_return) = false;
+          id(${stepper_id}_face_last_signal_ms) = millis();
+          id(${stepper_id}_facing_target).publish_state(label);
+          id(${stepper_id}_tg_go) = true;
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            # a takeover must also stop a running return to idle
+            - script.stop: ${stepper_id}_face_resume_idle
+            - script.execute: ${stepper_id}_face_run
+
+  # signal of a source cleared (optional, only used by 'Return Mode' = Motion Clear)
+  - id: ${stepper_id}_release_source
+    parameters:
+      source: string
+    then:
+      - lambda: |-
+          int i = id(${stepper_id}_face_current);
+          if (i >= 0 && id(${stepper_id}_face_busy) && id(${stepper_id}_tg_ids)[i] == source) {
+            id(${stepper_id}_face_released) = true;
+            ESP_LOGD("${stepper_id}", "Source '%s' released", source.c_str());
+          }
+
+  # leave the target now (comfort button / API action)
+  - id: ${stepper_id}_face_return_now
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          if (id(${stepper_id}_face_busy)) {
+            id(${stepper_id}_face_force_return) = true;
+          } else if (id(${stepper_id}_face_state) == "facing_target" && id(${stepper_id}_teach_index) < 0 && id(${stepper_id}_homing_phase) == 0) {
+            id(${stepper_id}_face_busy) = true;
+            id(${stepper_id}_idle_movement_priority) |= 1;
+            id(${stepper_id}_face_force_return) = true;
+            id(${stepper_id}_tg_go) = true;
+          } else {
+            ESP_LOGD("${stepper_id}", "Return to idle now: nothing to return from");
+          }
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_face_resume_idle
+
+  # moving_to_target -> facing_target -> (hold) 
+  - id: ${stepper_id}_face_run
+    mode: restart
+    then:
+      - script.execute:
+          id: ${stepper_id}_face_set_state
+          state: "moving_to_target"
+          reason: "signal"
+      - script.execute:
+          id: ${stepper_id}_apply_motion_profile
+          speed: !lambda 'return id(${stepper_id}_face_speed).state;'
+          acceleration: !lambda 'return id(${stepper_id}_face_acceleration).state;'
+          deceleration: !lambda 'return id(${stepper_id}_face_deceleration).state;'
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return (int) id(${stepper_id}_tg_positions)[id(${stepper_id}_face_current)]->state;'
+      - if:
+          condition:
+            lambda: 'return !id(${stepper_id}_move_accepted);'
+          then:
+            - script.execute:
+                id: ${stepper_id}_face_abort
+                state: "aborted"
+                reason: "move_rejected"
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_move_accepted);'
+          then:
+            # the soft limits may have clamped the target: remember what was really set
+            - lambda: 'id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;'
+            - wait_until:
+                condition:
+                  lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected) || id(${stepper_id}).has_reached_target();'
+            - if:
+                condition:
+                  lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected);'
+                then:
+                  - script.execute:
+                      id: ${stepper_id}_face_abort
+                      state: "aborted"
+                      reason: "manual_override"
+                else:
+                  - lambda: |-
+                      id(${stepper_id}_face_arrived_ms) = millis();
+                      float lo = id(${stepper_id}_hold_min).state;
+                      float hi = id(${stepper_id}_hold_max).state;
+                      float secs = hi > lo ? lo + random_float() * (hi - lo) : lo;
+                      id(${stepper_id}_face_hold_ms) = (uint32_t) (secs * 1000.0f);
+                  - script.execute:
+                      id: ${stepper_id}_face_set_state
+                      state: "facing_target"
+                      reason: "target_reached"
+                  - if:
+                      condition:
+                        lambda: |-
+                          return id(${stepper_id}_return_idle).state || id(${stepper_id}_face_force_return);
+                      then:
+                        - script.execute: ${stepper_id}_face_resume_idle
+                      else:
+                        # nothing to return to: the action is done at the target
+                        - script.execute: ${stepper_id}_face_finish
+
+  # facing_target -> wait for the return condition -> resuming_idle -> idle
+  - id: ${stepper_id}_face_resume_idle
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_face_state) == "facing_target" && !id(${stepper_id}_face_force_return);'
+          then:
+            - wait_until:
+                condition:
+                  lambda: |-
+                    if (id(${stepper_id}).target_position != id(${stepper_id}_face_expected)) {
+                      id(${stepper_id}_face_return_reason) = "";
+                      return true;
+                    }
+                    if (id(${stepper_id}_face_force_return)) {
+                      id(${stepper_id}_face_return_reason) = "manual";
+                      return true;
+                    }
+                    uint32_t now = millis();
+                    uint32_t timeout_ms = (uint32_t) (id(${stepper_id}_return_timeout).state * 1000.0f);
+                    if (timeout_ms > 0 && now - id(${stepper_id}_face_arrived_ms) >= timeout_ms) {
+                      id(${stepper_id}_face_return_reason) = "timeout";
+                      return true;
+                    }
+                    if (id(${stepper_id}_return_mode).active_index().value_or(0) == 1) {
+                      uint32_t ref = (int32_t) (id(${stepper_id}_face_last_signal_ms) - id(${stepper_id}_face_arrived_ms)) > 0 ? id(${stepper_id}_face_last_signal_ms) : id(${stepper_id}_face_arrived_ms);
+                      if (now - ref >= id(${stepper_id}_face_hold_ms)) {
+                        id(${stepper_id}_face_return_reason) = "timer";
+                        return true;
+                      }
+                    } else if (id(${stepper_id}_face_released)) {
+                      id(${stepper_id}_face_return_reason) = "released";
+                      return true;
+                    }
+                    return false;
+          else:
+            - lambda: 'id(${stepper_id}_face_return_reason) = "manual";'
+      - if:
+          condition:
+            # somebody else moved the motor while we were waiting
+            lambda: 'return id(${stepper_id}_face_return_reason) == "" && id(${stepper_id}_face_state) == "facing_target";'
+          then:
+            - script.execute:
+                id: ${stepper_id}_face_abort
+                state: "aborted"
+                reason: "manual_override"
+          else:
+            - script.execute:
+                id: ${stepper_id}_face_set_state
+                state: "resuming_idle"
+                reason: !lambda 'return id(${stepper_id}_face_return_reason);'
+            - script.execute:
+                id: ${stepper_id}_apply_motion_profile
+                speed: !lambda 'return id(${stepper_id}_idle_speed).state;'
+                acceleration: !lambda 'return id(${stepper_id}_idle_acceleration).state;'
+                deceleration: !lambda 'return id(${stepper_id}_idle_deceleration).state;'
+            - lambda: |-
+                int target;
+                int mode = id(${stepper_id}_idle_mode).active_index().value_or(0);
+                if (mode == 0) {
+                  target = (int) id(${stepper_id}_idle_position).state;
+                } else {
+                  int offset = (int) id(${stepper_id}_idle_offset).state;
+                  if (mode == 2) {
+                    int lo = (int) id(${stepper_id}_idle_offset_min).state;
+                    int hi = (int) id(${stepper_id}_idle_offset_max).state;
+                    if (lo > hi) std::swap(lo, hi);
+                    offset = lo + (int) (random_float() * (float) (hi - lo + 1));
+                    if (offset > hi) offset = hi;
+                  }
+                  target = id(${stepper_id}_face_origin) + offset;
+                  if (target < ${stepper_position_min}) target = ${stepper_position_min};
+                  if (target > ${stepper_position_max}) target = ${stepper_position_max};
+                  ESP_LOGD("${stepper_id}", "Idle position: last position %d %+d = %d", id(${stepper_id}_face_origin), offset, target);
+                }
+                id(${stepper_id}_face_idle_target) = target;
+            - script.execute:
+                id: ${stepper_id}_move_to
+                target: !lambda 'return id(${stepper_id}_face_idle_target);'
+            - if:
+                condition:
+                  lambda: 'return !id(${stepper_id}_move_accepted);'
+                then:
+                  - script.execute:
+                      id: ${stepper_id}_face_abort
+                      state: "aborted"
+                      reason: "move_rejected"
+            - if:
+                condition:
+                  lambda: 'return id(${stepper_id}_move_accepted);'
+                then:
+                  - lambda: |-
+                      id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;
+                      id(${stepper_id}_face_force_return) = false;
+                      id(${stepper_id}_face_return_reason) = "";
+                  - wait_until:
+                      condition:
+                        lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected) || id(${stepper_id}).has_reached_target();'
+                  - if:
+                      condition:
+                        lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected);'
+                      then:
+                        - script.execute:
+                            id: ${stepper_id}_face_abort
+                            state: "aborted"
+                            reason: "manual_override"
+                      else:
+                        - script.execute:
+                            id: ${stepper_id}_face_set_state
+                            state: "idle"
+                            reason: "idle_reached"
+                        - script.execute: ${stepper_id}_face_finish
+                        - lambda: |-
+                            id(${stepper_id}_face_current) = -1;
+                            id(${stepper_id}_facing_current_target).publish_state("none");
+
+  # the facing action is done: back to the general speed profile, start the cooldown
+  - id: ${stepper_id}_face_finish
+    then:
+      - script.execute: ${stepper_id}_apply_settings
+      - lambda: |-
+          id(${stepper_id}_face_busy) = false;
+          id(${stepper_id}_idle_movement_priority) &= ~1;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
+          float lo = id(${stepper_id}_cooldown_min).state;
+          float hi = id(${stepper_id}_cooldown_max).state;
+          float secs = hi > lo ? lo + random_float() * (hi - lo) : lo;
+          if (secs > 0) {
+            id(${stepper_id}_cooldown_until) = millis() + (uint32_t) (secs * 1000.0f);
+            id(${stepper_id}_cooldown_active) = true;
+            ESP_LOGD("${stepper_id}", "Cooldown %.1f s", secs);
+          } else {
+            id(${stepper_id}_cooldown_active) = false;
+          }
+
+  # facing was cancelled by somebody else; callers stop ${stepper_id}_face_run / ${stepper_id}_face_resume_idle themselves
+  - id: ${stepper_id}_face_abort
+    parameters:
+      state: string
+      reason: string
+    then:
+      - lambda: |-
+          bool owns_target = id(${stepper_id}_face_busy) && id(${stepper_id}_homing_phase) == 0;
+          owns_target = owns_target && id(${stepper_id}).target_position == id(${stepper_id}_face_expected);
+          if (owns_target) {
+            id(${stepper_id}).set_target(id(${stepper_id}).current_position);
+          }
+          id(${stepper_id}_face_busy) = false;
+          id(${stepper_id}_face_force_return) = false;
+          id(${stepper_id}_face_return_reason) = "";
+          id(${stepper_id}_idle_movement_priority) &= ~1;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
+      - script.execute:
+          id: ${stepper_id}_face_set_state
+          state: !lambda 'return state;'
+          reason: !lambda 'return reason;'
+      - lambda: |-
+          id(${stepper_id}_face_current) = -1;
+          id(${stepper_id}_facing_current_target).publish_state("none");
+      # keep the speed of a running homing, otherwise restore the general profile
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_homing_phase) == 0;'
+          then:
+            - script.execute: ${stepper_id}_apply_settings
+
+  # Stop the facing workflow before the generic stop changes its target.
+  - id: !extend ${stepper_id}_stop_callbacks
+    then:
+      - script.stop: ${stepper_id}_face_run
+      - script.stop: ${stepper_id}_face_resume_idle
+      - if:
+          condition:
+            lambda: |-
+              auto &state = id(${stepper_id}_face_state);
+              return state != "idle" && state != "disabled" && state != "aborted";
+          then:
+            - script.execute:
+                id: ${stepper_id}_face_abort
+                state: "aborted"
+                reason: "manual"
+
+  # --- teach workflow -----------------------------------------------------
+  - id: ${stepper_id}_teach_start
+    then:
+      - lambda: |-
+          if (id(${stepper_id}_tg_ids).empty()) {
+            ESP_LOGE("${stepper_id}", "Cannot teach: no target source registered");
+            id(${stepper_id}_teach_prompt).publish_state("Error: no target source registered");
+            id(${stepper_id}_tg_go) = false;
+            return;
+          }
+          if (id(${stepper_id}_homing_phase) != 0) {
+            ESP_LOGW("${stepper_id}", "Cannot teach while homing");
+            id(${stepper_id}_tg_go) = false;
+            return;
+          }
+          id(${stepper_id}_teach_index) = 0;
+          id(${stepper_id}_teach_recorded) = 0;
+          id(${stepper_id}_idle_movement_priority) |= 4;
+          id(${stepper_id}_tg_go) = true;
+          ESP_LOGI("${stepper_id}", "Teach workflow started");
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_move_start_callbacks
+            # a running facing action would walk away while teaching
+            - script.stop: ${stepper_id}_face_run
+            - script.stop: ${stepper_id}_face_resume_idle
+            - script.execute: ${stepper_id}_apply_settings
+            - if:
+                condition:
+                  lambda: 'return id(${stepper_id}_face_busy);'
+                then:
+                  - script.execute:
+                      id: ${stepper_id}_face_abort
+                      state: "aborted"
+                      reason: "teach_started"
+            - script.execute: ${stepper_id}_teach_enter
+
+  # prepares the prompt for the current source (or finishes the workflow) and moves to the stored position
+  - id: ${stepper_id}_teach_enter
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          auto &ids = id(${stepper_id}_tg_ids);
+          int i = id(${stepper_id}_teach_index);
+          if (i < 0) return;
+          if (i >= (int) ids.size()) {
+            id(${stepper_id}_teach_index) = -1;
+            id(${stepper_id}_idle_movement_priority) &= ~4;
+            id(${stepper_id}_idle_movement_paused) =
+              id(${stepper_id}_idle_movement_priority) != 0;
+            char done[96];
+            snprintf(done, sizeof(done), "Done: %d of %d source(s) recorded", id(${stepper_id}_teach_recorded), (int) ids.size());
+            id(${stepper_id}_teach_prompt).publish_state(done);
+            if (id(${stepper_id}_teach_recorded) > 0) {
+              auto now = id(ha_time).now();
+              if (now.is_valid()) {
+                id(${stepper_id}_last_taught).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
+              }
+            }
+            ESP_LOGI("${stepper_id}", "Teach workflow finished: %s", done);
+            return;
+          }
+          char buf[200];
+          snprintf(buf, sizeof(buf), "%d/%d '%s': move the stepper to face it, then press Teach Confirm (Skip keeps the stored position)",
+                   i + 1, (int) ids.size(), id(${stepper_id}_tg_labels)[i].c_str());
+          id(${stepper_id}_teach_prompt).publish_state(buf);
+          ESP_LOGI("${stepper_id}", "Teach: %s", buf);
+          if (id(${stepper_id}_tg_taught)[i]->state && id(${stepper_id}_tg_positions)[i]->has_state()) {
+            id(${stepper_id}_tg_target) = (int) id(${stepper_id}_tg_positions)[i]->state;
+            id(${stepper_id}_tg_go) = true;
+          }
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute:
+                id: ${stepper_id}_move_to
+                target: !lambda 'return id(${stepper_id}_tg_target);'
+
+  - id: ${stepper_id}_teach_confirm
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          int i = id(${stepper_id}_teach_index);
+          if (i < 0 || i >= (int) id(${stepper_id}_tg_ids).size()) {
+            ESP_LOGW("${stepper_id}", "Teach Confirm ignored: workflow not started");
+            return;
+          }
+          if (!id(${stepper_id}).has_reached_target()) {
+            ESP_LOGW("${stepper_id}", "Teach Confirm ignored: the stepper is still moving");
+            id(${stepper_id}_teach_prompt).publish_state("Stepper still moving, wait until it stopped and confirm again");
+            return;
+          }
+          int32_t pos = id(${stepper_id}).current_position;
+          auto &traits = id(${stepper_id}_tg_positions)[i]->traits;
+          if (pos < traits.get_min_value() || pos > traits.get_max_value()) {
+            ESP_LOGW("${stepper_id}", "Teach Confirm rejected: position %d is outside the allowed range %d..%d of '%s'",
+                     (int) pos, (int) traits.get_min_value(), (int) traits.get_max_value(), id(${stepper_id}_tg_labels)[i].c_str());
+            id(${stepper_id}_teach_prompt).publish_state("Position out of range for this source, move the stepper within range and confirm again");
+            return;
+          }
+          auto call = id(${stepper_id}_tg_positions)[i]->make_call();
+          call.set_value(pos);
+          call.perform();
+          id(${stepper_id}_tg_taught)[i]->turn_on();
+          id(${stepper_id}_teach_recorded)++;
+          ESP_LOGI("${stepper_id}", "Recorded position %d for '%s'", (int) pos, id(${stepper_id}_tg_labels)[i].c_str());
+          id(${stepper_id}_teach_index) = i + 1;
+          id(${stepper_id}_tg_go) = true;
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_teach_enter
+
+  - id: ${stepper_id}_teach_skip
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          int i = id(${stepper_id}_teach_index);
+          if (i < 0) {
+            ESP_LOGW("${stepper_id}", "Teach Skip ignored: workflow not started");
+            return;
+          }
+          id(${stepper_id}_teach_index) = i + 1;
+          id(${stepper_id}_tg_go) = true;
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_teach_enter
+
+  - id: ${stepper_id}_teach_cancel
+    then:
+      - lambda: |-
+          if (id(${stepper_id}_teach_index) < 0) return;
+          id(${stepper_id}_teach_index) = -1;
+          id(${stepper_id}_idle_movement_priority) &= ~4;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
+          id(${stepper_id}_teach_prompt).publish_state("Cancelled");
+          ESP_LOGW("${stepper_id}", "Teach workflow cancelled, positions recorded so far are kept");

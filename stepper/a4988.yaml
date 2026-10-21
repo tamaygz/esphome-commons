@@ -1,0 +1,56 @@
+# A4988 / DRV8825 (STEP/DIR) driven stepper. Declares the hardware and includes the generic
+# stepper control layer (stepper_control.yaml) with all sensors, numbers, buttons and scripts.
+#
+# Variables (see stepper_control.yaml for the ones passed through):
+#   stepper_step_pin       GPIO connected to STEP
+#   stepper_dir_pin        GPIO connected to DIR
+#   stepper_dir_inverted   "true" to reverse the motor direction
+#
+# Need a SLEEP pin? Extend the stepper in your device config:
+#   stepper:
+#     - id: !extend my_stepper
+#       sleep_pin: GPIO27
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  stepper_step_pin: GPIO19
+  stepper_dir_pin: GPIO21
+  stepper_dir_inverted: "false"
+  stepper_position_min: "-3000"
+  stepper_position_max: "3000"
+  stepper_move_step: "100"
+  stepper_max_speed: "250"
+  stepper_acceleration: "50"
+  stepper_deceleration: "75"
+  stepper_steps_per_revolution: "200"
+  stepper_preset_1: "0"
+  stepper_preset_2: "1000"
+  stepper_publish_interval: "500ms"
+
+packages:
+  stepper_control: !include
+    file: stepper_control.yaml
+    vars:
+      stepper_id: ${stepper_id}
+      stepper_name: ${stepper_name}
+      stepper_position_min: ${stepper_position_min}
+      stepper_position_max: ${stepper_position_max}
+      stepper_move_step: ${stepper_move_step}
+      stepper_max_speed: ${stepper_max_speed}
+      stepper_acceleration: ${stepper_acceleration}
+      stepper_deceleration: ${stepper_deceleration}
+      stepper_steps_per_revolution: ${stepper_steps_per_revolution}
+      stepper_preset_1: ${stepper_preset_1}
+      stepper_preset_2: ${stepper_preset_2}
+      stepper_publish_interval: ${stepper_publish_interval}
+
+stepper:
+  - platform: a4988
+    id: ${stepper_id}
+    step_pin: ${stepper_step_pin}
+    dir_pin:
+      number: ${stepper_dir_pin}
+      inverted: ${stepper_dir_inverted}
+    max_speed: ${stepper_max_speed}steps/s
+    acceleration: ${stepper_acceleration}steps/s^2
+    deceleration: ${stepper_deceleration}steps/s^2

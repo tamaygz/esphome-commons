@@ -48,6 +48,11 @@ For more examples check /examples
 - **File:** `common/device_base.yaml`
 - **Description:** Base configuration for ESPHome devices, including common packages like WiFi, API, logger, status sensor, restart button, version sensor, and time.
 
+### Device Base for ESP32
+
+- **File:** `common/device_base_esp32.yaml`
+- **Description:** Base configuration for ESP32 devices (`board` e.g. `esp32dev`) and common packages.
+
 ### Device Base for ESP8266
 
 - **File:** `common/device_base_esp8266.yaml`
@@ -93,6 +98,50 @@ For more examples check /examples
 
 - **Files:** `common/binary_sensor/gpio_sensor.yaml`, `common/binary_sensor/status.yaml`
 - **Description:** Configurations for GPIO and status binary sensors.
+
+### Motion Sensor and Endstop
+
+- **Files:** `common/binary_sensor/motion_sensor.yaml`, `common/binary_sensor/endstop.yaml`
+- **Description:**
+  - `motion_sensor.yaml`: PIR/radar motion sensor with runtime configurable (HA) trigger/clear delays, an `Enabled` switch and diagnostics (`Last Detected` timestamp, `Last Duration`, `Detections` counter).
+  - `endstop.yaml`: GPIO endstop/limit switch/hall sensor, typically wired to the stepper home signal.
+- **Variables:** (motion) `mtime_on`, `mtime_off` initial trigger/clear delay in **milliseconds**; `motion_start_callback_script`, `motion_end_callback_script`; (endstop) `endstop_pin`, `endstop_inverted`, `endstop_press_callback_script`, `endstop_release_callback_script`.
+- The default callback scripts are now named `<sensor_id>_signal_start_dummy` / `<sensor_id>_signal_stop_dummy`, so multiple GPIO sensors can be used in one device.
+
+### Stepper Motors
+
+- **Files:** `common/stepper/uln2003.yaml`, `common/stepper/a4988.yaml` (hardware drivers), `common/stepper/stepper_control.yaml` (generic control layer, included by the drivers), `common/features/stepper_homing.yaml` (optional homing)
+- **Description:** Full stepper support built from reusable pieces:
+  - **Configurable from HA (config category, restored after reboot):** max speed, acceleration, deceleration, move step, soft limit min/max, soft limits on/off, two preset positions, hold torque (ULN2003), homing speed / max distance / backoff / direction / home position, home on boot.
+  - **Control:** target position number, move forward/backward by *Move Step*, stop, go to min/max/zero/preset 1/preset 2, set current position as zero. Scripts `<id>_move_to`, `<id>_move_relative`, `<id>_stop`, `<id>_set_position` can be used in your own automations.
+  - **Sensors/diagnostics:** current position, angle, steps remaining, moving, status (Idle/Moving/Homing), homed, last moved, total steps travelled (odometer), home signal, homing result, last homed.
+  - The last position is persisted after each move and restored on boot (open loop steppers have no position feedback, so re-home if the shaft may have been moved by hand or power was lost mid-move).
+- **Homing:** *Manual*: jog to the desired spot and press `Set Home Here`. *Automatic*: press `Home` (or enable `Home On Boot`); the motor searches at homing speed until the **home signal** is asserted, backs off and defines this as home position. Any source can be the home signal: call the scripts `<id>_home_signal_on` / `<id>_home_signal_off` (e.g. via `endstop_press_callback_script`, `motion_start_callback_script`, or a HA automation).
+- **Variables:** `stepper_id`, `stepper_name`, pins (`stepper_pin_a..d` / `stepper_step_pin`, `stepper_dir_pin`), `stepper_position_min/max`, `stepper_max_speed`, `stepper_acceleration`, `stepper_deceleration`, `stepper_steps_per_revolution`, `stepper_preset_1/2`, and the `stepper_homing_*` variables documented in `features/stepper_homing.yaml`.
+- **Example:** `example-esp-devices/halloween-stepper.yaml`. Requires `time.yaml` (included by the device base) for the timestamp sensors.
+
+### Stepper Facing (move/face to target source)
+
+- **Files:** `common/features/stepper_facing.yaml` (once per stepper), `common/features/stepper_target_source.yaml` (once per source, 0..n times)
+- **Description:** The stepper turns to the position recorded for whichever *target source* signals. A source is a motion sensor on the device (`motion_start_callback_script: <stepper_id>_face_<target_id>`, `motion_end_callback_script: <stepper_id>_release_<target_id>`) or an external trigger (HA action `esphome.<node>_<stepper_id>_face_source` with `source: <target_id>`).
+- **Teaching positions (interactive, persisted):** `Teach Start` → move the stepper to face the source → `Teach Confirm` (next source is prompted; `Teach Skip` keeps the stored position, `Teach Cancel` aborts). `Teach Prompt` shows what is asked. Also available as API actions `<stepper_id>_teach_start/_confirm/_skip/_cancel`; each source also has a `Record <name> Position` button and editable `Position`/`Taught` entities. Facing is suspended while teaching.
+- **Safety net:** with `Face Target Source` enabled, sources that were never taught are not moved to; a warning is logged (boot and every blocked trigger), `Teach Required` (problem) turns on and `Facing Status` reports it (Teaching/Disabled/Teach required/Ready).
+- **Facing behaviour (all configurable from HA, restored after reboot):**
+  - `Face Interruptible` (default off): while a facing action runs (from the signal until the target – or, with *Return To Idle*, the idle position – is reached) signals from other sources are ignored; on = a new signal takes over immediately.
+  - `Cooldown Min/Max` (seconds): after an action is done new signals are ignored for this time; a fixed time, or random in the range when Max > Min.
+  - `Return To Idle` + `Return Mode`: *Motion Clear* (return when the source calls `<stepper_id>_release_<target_id>`, e.g. `motion_end_callback_script`) or *Timer* (after `Hold Time Min/Max`, random in the range). `Return Timeout` is a safety limit for sources that never clear (0 = off). `Idle Position Mode` select: *Absolute* (`Idle Position` number), *Relative* (`Idle Offset` steps from the last position, i.e. where the stepper was when facing started) or *Random Relative* (random offset between `Idle Offset Min` and `Idle Offset Max`, drawn on every return; results are clamped to the stepper limits). `Set Idle Position Here` and `Return To Idle Now` buttons (API action `<stepper_id>_face_return_now`).
+  - `Face Speed/Acceleration/Deceleration` and `Idle Speed/Acceleration/Deceleration`: separate motion profiles for facing the target and resuming idle (0 = general stepper setting).
+- **State/events for HA:** text sensor `Facing State` (`idle`, `moving_to_target`, `facing_target`, `resuming_idle`, `aborted`, `disabled`), `Facing Target` (source being faced) and the HA event `esphome.<stepper_id>_facing` (`event_type` = `state_changed`/`signal_ignored`, `state`, `previous_state`, `target`, `target_name`, `reason`, `position`) to trigger HA automations. Events require *Allow the device to perform Home Assistant actions* in the ESPHome integration.
+- **Other entities:** `Taught Sources`, `Registered Sources`, `Last Faced Source`, `Last Taught`, `Facing Cooldown`/`Remaining`, per-source `Last Triggered`.
+- **Variables:** `stepper_facing_enabled`, `stepper_facing_interruptible`, `stepper_facing_cooldown_min/_max`, `stepper_return_idle`, `stepper_return_mode`, `stepper_return_hold_min/_max`, `stepper_return_timeout`, `stepper_idle_mode`, `stepper_idle_position`, `stepper_idle_offset`, `stepper_idle_offset_min/_max`, `stepper_face_*` / `stepper_idle_*` (speed, acceleration, deceleration), `stepper_facing_event`; per source `target_id`, `target_name`, `target_order`, `target_default_position`. See `example-esp-devices/halloween-stepper.yaml`.
+
+### Stepper Idle Movement
+
+- **File:** `common/features/stepper_idle_movement.yaml` (optional, once per stepper).
+- **Description:** When enabled (default ON and restored), periodically moves the stepper by a fixed or random signed offset. Configure a fixed interval or random interval range, fixed or random offset range, and a separate speed/acceleration/deceleration profile (0 uses the general stepper setting). Idle movement pauses while the stepper is moving, homing, facing a source, teaching, or handling another move/stop/position command, and resumes after higher-priority work completes.
+- **Entities:** `Idle Movement` switch; interval and position mode selectors; min/max interval and delta numbers; movement speed profile numbers; `Idle Movement State` diagnostic text sensor (`disabled`, `paused`, `idling`, `idle_moving`).
+- **Event:** `esphome.<stepper_id>_idle_movement`, with `event_type: position_reached`, `position`, and signed `delta`.
+- **Variables:** `stepper_idle_movement_enabled`, `stepper_idle_movement_interval_mode`, `stepper_idle_movement_interval_min/_max`, `stepper_idle_movement_position_mode`, `stepper_idle_movement_delta`, `stepper_idle_movement_delta_min/_max`, `stepper_idle_movement_speed/_acceleration/_deceleration`, and `stepper_idle_movement_event`. See `example-esp-devices/halloween-stepper.yaml`.
 
 ### Buttons
 
