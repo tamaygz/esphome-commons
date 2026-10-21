@@ -48,6 +48,11 @@ For more examples check /examples
 - **File:** `common/device_base.yaml`
 - **Description:** Base configuration for ESPHome devices, including common packages like WiFi, API, logger, status sensor, restart button, version sensor, and time.
 
+### Device Base for ESP32
+
+- **File:** `common/device_base_esp32.yaml`
+- **Description:** Base configuration for ESP32 devices (`board` e.g. `esp32dev`) and common packages.
+
 ### Device Base for ESP8266
 
 - **File:** `common/device_base_esp8266.yaml`
@@ -93,6 +98,27 @@ For more examples check /examples
 
 - **Files:** `common/binary_sensor/gpio_sensor.yaml`, `common/binary_sensor/status.yaml`
 - **Description:** Configurations for GPIO and status binary sensors.
+
+### Motion Sensor and Endstop
+
+- **Files:** `common/binary_sensor/motion_sensor.yaml`, `common/binary_sensor/endstop.yaml`
+- **Description:**
+  - `motion_sensor.yaml`: PIR/radar motion sensor with runtime configurable (HA) trigger/clear delays, an `Enabled` switch and diagnostics (`Last Detected` timestamp, `Last Duration`, `Detections` counter).
+  - `endstop.yaml`: GPIO endstop/limit switch/hall sensor, typically wired to the stepper home signal.
+- **Variables:** (motion) `mtime_on`, `mtime_off` initial trigger/clear delay in **milliseconds**; `motion_start_callback_script`, `motion_end_callback_script`; (endstop) `endstop_pin`, `endstop_inverted`, `endstop_press_callback_script`, `endstop_release_callback_script`.
+- The default callback scripts are now named `<sensor_id>_signal_start_dummy` / `<sensor_id>_signal_stop_dummy`, so multiple GPIO sensors can be used in one device.
+
+### Stepper Motors
+
+- **Files:** `common/stepper/uln2003.yaml`, `common/stepper/a4988.yaml` (hardware drivers), `common/stepper/stepper_control.yaml` (generic control layer, included by the drivers), `common/features/stepper_homing.yaml` (optional homing)
+- **Description:** Full stepper support built from reusable pieces:
+  - **Configurable from HA (config category, restored after reboot):** max speed, acceleration, deceleration, move step, soft limit min/max, soft limits on/off, two preset positions, hold torque (ULN2003), homing speed / max distance / backoff / direction / home position, home on boot.
+  - **Control:** target position number, move forward/backward by *Move Step*, stop, go to min/max/zero/preset 1/preset 2, set current position as zero. Scripts `<id>_move_to`, `<id>_move_relative`, `<id>_stop`, `<id>_set_position` can be used in your own automations.
+  - **Sensors/diagnostics:** current position, angle, steps remaining, moving, status (Idle/Moving/Homing), homed, last moved, total steps travelled (odometer), home signal, homing result, last homed.
+  - The last position is persisted after each move and restored on boot (open loop steppers have no position feedback, so re-home if the shaft may have been moved by hand or power was lost mid-move).
+- **Homing:** *Manual*: jog to the desired spot and press `Set Home Here`. *Automatic*: press `Home` (or enable `Home On Boot`); the motor searches at homing speed until the **home signal** is asserted, backs off and defines this as home position. Any source can be the home signal: call the scripts `<id>_home_signal_on` / `<id>_home_signal_off` (e.g. via `endstop_press_callback_script`, `motion_start_callback_script`, or a HA automation).
+- **Variables:** `stepper_id`, `stepper_name`, pins (`stepper_pin_a..d` / `stepper_step_pin`, `stepper_dir_pin`), `stepper_position_min/max`, `stepper_max_speed`, `stepper_acceleration`, `stepper_deceleration`, `stepper_steps_per_revolution`, `stepper_preset_1/2`, and the `stepper_homing_*` variables documented in `features/stepper_homing.yaml`.
+- **Example:** `example-esp-devices/halloween-stepper.yaml`. Requires `time.yaml` (included by the device base) for the timestamp sensors.
 
 ### Buttons
 

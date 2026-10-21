@@ -1,0 +1,464 @@
+# Driver-agnostic stepper control layer.
+# Normally not included directly: use stepper/uln2003.yaml or stepper/a4988.yaml,
+# which declare the actual `stepper:` hardware and include this file.
+#
+# Requires a stepper component with the id ${stepper_id} and a time source with
+# the id `ha_time` (see time.yaml).
+#
+# Everything that is configurable is exposed as number/switch entity (entity_category: config,
+# restored after reboot), everything that is useful for monitoring is exposed as
+# sensor / binary_sensor / text_sensor (entity_category: diagnostic where appropriate).
+#
+# Scripts for use in your own automations (all clamp to the soft limits):
+#   ${stepper_id}_move_to          (target: int)    move to an absolute position
+#   ${stepper_id}_move_relative    (delta: int)     move relative to the current target
+#   ${stepper_id}_stop                              stop immediately (also aborts homing)
+#   ${stepper_id}_set_position     (position: int)  declare the current physical position
+#   ${stepper_id}_apply_settings                    (re-)apply speed/acceleration/deceleration
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  stepper_position_min: "-3000"        # hard travel range, bounds of all position numbers
+  stepper_position_max: "3000"
+  stepper_move_step: "100"             # initial value of the 'Move Step' number (steps)
+  stepper_max_speed: "250"             # initial value of the 'Max Speed' number (steps/s)
+  stepper_acceleration: "50"           # initial value of the 'Acceleration' number (steps/s^2)
+  stepper_deceleration: "75"           # initial value of the 'Deceleration' number (steps/s^2)
+  stepper_steps_per_revolution: "2048" # used for the angle sensor (28BYJ-48: 2048 full / 4096 half steps)
+  stepper_preset_1: "0"                # initial values of the preset positions
+  stepper_preset_2: "1000"
+  stepper_publish_interval: "500ms"    # how often position sensors are refreshed
+
+globals:
+  - id: ${stepper_id}_saved_position
+    type: int
+    restore_value: yes
+    initial_value: '0'
+  - id: ${stepper_id}_total_steps
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  - id: ${stepper_id}_homed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  # 0 = not homing, 1 = seeking the home signal, 2 = backing off the home signal
+  - id: ${stepper_id}_homing_phase
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            // position feedback does not exist on open loop steppers: restore the last known position
+            // and make it the target as well, otherwise the motor would travel to 0 right after boot.
+            id(${stepper_id}).report_position(id(${stepper_id}_saved_position));
+            id(${stepper_id}).set_target(id(${stepper_id}_saved_position));
+            id(${stepper_id}_total_steps_sensor).publish_state(id(${stepper_id}_total_steps));
+            ESP_LOGI("${stepper_id}", "Restored position %d", id(${stepper_id}_saved_position));
+        - script.execute: ${stepper_id}_apply_settings
+
+# ---------------------------------------------------------------------------
+# configuration (HA: Configuration)
+# ---------------------------------------------------------------------------
+number:
+  - platform: template
+    id: ${stepper_id}_max_speed
+    name: "${stepper_name} Max Speed"
+    icon: mdi:speedometer
+    unit_of_measurement: "steps/s"
+    min_value: 1
+    max_value: 5000
+    step: 1
+    mode: box
+    initial_value: ${stepper_max_speed}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    set_action:
+      - stepper.set_speed:
+          id: ${stepper_id}
+          speed: !lambda 'return x;'
+  - platform: template
+    id: ${stepper_id}_acceleration
+    name: "${stepper_name} Acceleration"
+    icon: mdi:rocket-launch-outline
+    unit_of_measurement: "steps/s²"
+    min_value: 1
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_acceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    set_action:
+      - stepper.set_acceleration:
+          id: ${stepper_id}
+          acceleration: !lambda 'return x;'
+  - platform: template
+    id: ${stepper_id}_deceleration
+    name: "${stepper_name} Deceleration"
+    icon: mdi:car-brake-alert
+    unit_of_measurement: "steps/s²"
+    min_value: 1
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_deceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    set_action:
+      - stepper.set_deceleration:
+          id: ${stepper_id}
+          deceleration: !lambda 'return x;'
+  - platform: template
+    id: ${stepper_id}_move_step
+    name: "${stepper_name} Move Step"
+    icon: mdi:arrow-expand-horizontal
+    unit_of_measurement: "steps"
+    min_value: 1
+    max_value: 100000
+    step: 1
+    mode: box
+    initial_value: ${stepper_move_step}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_limit_min
+    name: "${stepper_name} Soft Limit Min"
+    icon: mdi:arrow-collapse-left
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    initial_value: ${stepper_position_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_limit_max
+    name: "${stepper_name} Soft Limit Max"
+    icon: mdi:arrow-collapse-right
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    initial_value: ${stepper_position_max}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_preset_1
+    name: "${stepper_name} Preset 1 Position"
+    icon: mdi:numeric-1-box-outline
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    initial_value: ${stepper_preset_1}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_preset_2
+    name: "${stepper_name} Preset 2 Position"
+    icon: mdi:numeric-2-box-outline
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    initial_value: ${stepper_preset_2}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+  # ------------------------------------------------------------------------
+  # control
+  # ------------------------------------------------------------------------
+  - platform: template
+    id: ${stepper_id}_target
+    name: "${stepper_name} Target Position"
+    icon: mdi:target
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    update_interval: ${stepper_publish_interval}
+    lambda: 'return id(${stepper_id}).target_position;'
+    set_action:
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return (int) x;'
+
+switch:
+  - platform: template
+    id: ${stepper_id}_limits_enabled
+    name: "${stepper_name} Soft Limits"
+    icon: mdi:ray-start-end
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+
+# ---------------------------------------------------------------------------
+# comfort buttons
+# ---------------------------------------------------------------------------
+button:
+  - platform: template
+    id: ${stepper_id}_btn_forward
+    name: "${stepper_name} Move Forward"
+    icon: mdi:chevron-right
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_relative
+          delta: !lambda 'return (int) id(${stepper_id}_move_step).state;'
+  - platform: template
+    id: ${stepper_id}_btn_backward
+    name: "${stepper_name} Move Backward"
+    icon: mdi:chevron-left
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_relative
+          delta: !lambda 'return -(int) id(${stepper_id}_move_step).state;'
+  - platform: template
+    id: ${stepper_id}_btn_stop
+    name: "${stepper_name} Stop"
+    icon: mdi:stop-circle-outline
+    on_press:
+      - script.execute: ${stepper_id}_stop
+  - platform: template
+    id: ${stepper_id}_btn_goto_min
+    name: "${stepper_name} Go To Min"
+    icon: mdi:page-first
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return (int) id(${stepper_id}_limit_min).state;'
+  - platform: template
+    id: ${stepper_id}_btn_goto_max
+    name: "${stepper_name} Go To Max"
+    icon: mdi:page-last
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return (int) id(${stepper_id}_limit_max).state;'
+  - platform: template
+    id: ${stepper_id}_btn_goto_zero
+    name: "${stepper_name} Go To Zero"
+    icon: mdi:numeric-0-box-outline
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: 0
+  - platform: template
+    id: ${stepper_id}_btn_goto_preset_1
+    name: "${stepper_name} Go To Preset 1"
+    icon: mdi:numeric-1-box-outline
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return (int) id(${stepper_id}_preset_1).state;'
+  - platform: template
+    id: ${stepper_id}_btn_goto_preset_2
+    name: "${stepper_name} Go To Preset 2"
+    icon: mdi:numeric-2-box-outline
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return (int) id(${stepper_id}_preset_2).state;'
+  - platform: template
+    id: ${stepper_id}_btn_set_zero
+    name: "${stepper_name} Set Current Position As Zero"
+    icon: mdi:home-map-marker
+    entity_category: config
+    on_press:
+      - script.execute:
+          id: ${stepper_id}_set_position
+          position: 0
+
+# ---------------------------------------------------------------------------
+# monitoring
+# ---------------------------------------------------------------------------
+sensor:
+  - platform: template
+    id: ${stepper_id}_position
+    name: "${stepper_name} Current Position"
+    icon: mdi:axis-arrow
+    unit_of_measurement: "steps"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: ${stepper_publish_interval}
+    lambda: 'return id(${stepper_id}).current_position;'
+    filters:
+      - delta: 0.5
+  - platform: template
+    id: ${stepper_id}_angle
+    name: "${stepper_name} Angle"
+    icon: mdi:angle-acute
+    unit_of_measurement: "°"
+    accuracy_decimals: 1
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: ${stepper_publish_interval}
+    lambda: 'return id(${stepper_id}).current_position * 360.0f / ${stepper_steps_per_revolution};'
+    filters:
+      - delta: 0.05
+  - platform: template
+    id: ${stepper_id}_steps_remaining
+    name: "${stepper_name} Steps Remaining"
+    icon: mdi:ray-end-arrow
+    unit_of_measurement: "steps"
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: ${stepper_publish_interval}
+    lambda: 'return id(${stepper_id}).target_position - id(${stepper_id}).current_position;'
+    filters:
+      - delta: 0.5
+  # odometer, published after every completed move
+  - platform: template
+    id: ${stepper_id}_total_steps_sensor
+    name: "${stepper_name} Total Steps Travelled"
+    icon: mdi:counter
+    unit_of_measurement: "steps"
+    accuracy_decimals: 0
+    state_class: total_increasing
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: template
+    id: ${stepper_id}_moving
+    name: "${stepper_name} Moving"
+    device_class: moving
+    lambda: 'return !id(${stepper_id}).has_reached_target();'
+    on_release:
+      then:
+        - lambda: |-
+            // a move has completed: persist the position and update the odometer / diagnostics
+            int32_t pos = id(${stepper_id}).current_position;
+            int32_t travelled = pos - id(${stepper_id}_saved_position);
+            id(${stepper_id}_total_steps) += (uint32_t) (travelled < 0 ? -travelled : travelled);
+            id(${stepper_id}_saved_position) = pos;
+            id(${stepper_id}_total_steps_sensor).publish_state(id(${stepper_id}_total_steps));
+            auto now = id(ha_time).now();
+            if (travelled != 0 && now.is_valid()) {
+              id(${stepper_id}_last_moved).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
+            }
+            ESP_LOGD("${stepper_id}", "Move finished at position %d (%d steps)", pos, travelled);
+  - platform: template
+    id: ${stepper_id}_homed_sensor
+    name: "${stepper_name} Homed"
+    icon: mdi:home-circle-outline
+    entity_category: diagnostic
+    lambda: 'return id(${stepper_id}_homed);'
+
+text_sensor:
+  - platform: template
+    id: ${stepper_id}_status
+    name: "${stepper_name} Status"
+    icon: mdi:state-machine
+    update_interval: 500ms
+    lambda: |-
+      static std::string last;
+      std::string s = "Idle";
+      if (id(${stepper_id}_homing_phase) != 0) {
+        s = "Homing";
+      } else if (!id(${stepper_id}).has_reached_target()) {
+        s = "Moving";
+      }
+      if (s == last) return {};
+      last = s;
+      return s;
+  - platform: template
+    id: ${stepper_id}_last_moved
+    name: "${stepper_name} Last Moved"
+    icon: mdi:clock-end
+    device_class: timestamp
+    entity_category: diagnostic
+
+# ---------------------------------------------------------------------------
+# scripts
+# ---------------------------------------------------------------------------
+script:
+  - id: ${stepper_id}_apply_settings
+    then:
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_max_speed).has_state() && id(${stepper_id}_max_speed).state > 0;'
+          then:
+            - stepper.set_speed:
+                id: ${stepper_id}
+                speed: !lambda 'return id(${stepper_id}_max_speed).state;'
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_acceleration).has_state() && id(${stepper_id}_acceleration).state > 0;'
+          then:
+            - stepper.set_acceleration:
+                id: ${stepper_id}
+                acceleration: !lambda 'return id(${stepper_id}_acceleration).state;'
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_deceleration).has_state() && id(${stepper_id}_deceleration).state > 0;'
+          then:
+            - stepper.set_deceleration:
+                id: ${stepper_id}
+                deceleration: !lambda 'return id(${stepper_id}_deceleration).state;'
+
+  - id: ${stepper_id}_move_to
+    parameters:
+      target: int
+    then:
+      - lambda: |-
+          if (id(${stepper_id}_homing_phase) != 0) {
+            ESP_LOGW("${stepper_id}", "Ignoring move to %d: homing in progress (press stop to abort)", target);
+            return;
+          }
+          int32_t t = target;
+          if (id(${stepper_id}_limits_enabled).state && id(${stepper_id}_limit_min).has_state() &&
+              id(${stepper_id}_limit_max).has_state()) {
+            int32_t lo = (int32_t) id(${stepper_id}_limit_min).state;
+            int32_t hi = (int32_t) id(${stepper_id}_limit_max).state;
+            if (lo <= hi) {
+              t = t < lo ? lo : (t > hi ? hi : t);
+              if (t != target) ESP_LOGW("${stepper_id}", "Target %d clamped to soft limit %d", (int) target, (int) t);
+            }
+          }
+          ESP_LOGD("${stepper_id}", "Moving from %d to %d", id(${stepper_id}).current_position, t);
+          id(${stepper_id}).set_target(t);
+
+  - id: ${stepper_id}_move_relative
+    parameters:
+      delta: int
+    then:
+      # relative to the current target so repeated presses add up while the motor is still moving
+      - script.execute:
+          id: ${stepper_id}_move_to
+          target: !lambda 'return id(${stepper_id}).target_position + delta;'
+
+  - id: ${stepper_id}_stop
+    then:
+      - lambda: |-
+          id(${stepper_id}_homing_phase) = 0;
+          id(${stepper_id}).set_target(id(${stepper_id}).current_position);
+          ESP_LOGI("${stepper_id}", "Stopped at position %d", id(${stepper_id}).current_position);
+
+  - id: ${stepper_id}_set_position
+    parameters:
+      position: int
+    then:
+      - lambda: |-
+          // redefine where the motor currently is (no movement); keeps the odometer consistent
+          id(${stepper_id}).report_position(position);
+          id(${stepper_id}).set_target(position);
+          id(${stepper_id}_saved_position) = position;
+          ESP_LOGI("${stepper_id}", "Current position set to %d", (int) position);

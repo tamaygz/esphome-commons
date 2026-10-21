@@ -1,0 +1,74 @@
+# ESP32 dev module driving a 28BYJ-48 stepper (ULN2003) with a PIR motion sensor and a home endstop.
+#
+# Substitutions:
+# - id / friendly_name: device name used for the hostname and in Home Assistant.
+# - board: esp32dev (Espressif ESP32 Dev Module).
+#
+# Packages:
+# - base: common ESP32 base (wifi, api, logger, status, restart, version, time).
+# - web_server: optional (secured) web server.
+# - stepper: ULN2003 stepper with position/angle/status sensors, speed/acceleration/limits/presets
+#   configurable in HA, move/stop/preset buttons, position persistence and odometer.
+#   (use common/stepper/a4988.yaml instead for STEP/DIR drivers)
+# - homing: manual ('Set Home Here') and automatic ('Home' button / 'Home On Boot') homing.
+#   The home signal is whatever calls the scripts stepper_motor_home_signal_on / stepper_motor_home_signal_off.
+# - endstop: GPIO limit switch wired to the home signal. Remove it (and wire your own signal to the
+#   scripts above) if you have no endstop; manual homing keeps working.
+# - motion: PIR on GPIO4 with last detected / duration / detection counter and HA configurable delays.
+
+substitutions:
+  id: halloween1
+  friendly_name: Halloween1
+  board: esp32dev
+  version: dev
+  log_level: debug
+
+packages:
+  base: !include common/device_base_esp32.yaml
+  web_server: !include common/web_server.yaml
+
+  stepper: !include
+    file: common/stepper/uln2003.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_pin_a: GPIO19
+      stepper_pin_b: GPIO21
+      stepper_pin_c: GPIO22
+      stepper_pin_d: GPIO23
+      stepper_max_speed: "246"
+      stepper_acceleration: "50"
+      stepper_deceleration: "75"
+      stepper_position_min: "-3000"
+      stepper_position_max: "3000"
+      stepper_preset_1: "0"
+      stepper_preset_2: "2000"
+
+  homing: !include
+    file: common/features/stepper_homing.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_position_min: "-3000"
+      stepper_position_max: "3000"
+      stepper_homing_speed: "100"
+      stepper_homing_max_distance: "6000"
+      stepper_homing_backoff: "50"
+
+  endstop: !include
+    file: common/binary_sensor/endstop.yaml
+    vars:
+      sensor_id: stepper_endstop
+      sensor_name: "Stepper Endstop"
+      endstop_pin: GPIO18
+      endstop_press_callback_script: stepper_motor_home_signal_on
+      endstop_release_callback_script: stepper_motor_home_signal_off
+
+  motion: !include
+    file: common/binary_sensor/motion_sensor.yaml
+    vars:
+      sensor_id: motion_detected
+      sensor_name: "Motion Detected"
+      sensor_pin: GPIO4
+      mtime_on: "250"
+      mtime_off: "3000"

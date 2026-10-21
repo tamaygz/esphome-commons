@@ -2,9 +2,9 @@ substitutions:
   sensor_id: "gpio_sensor"
   sensor_name: "GPIO Sensor"
   sensor_pin: GPIO02
-  sensor_device_class: none
-  signal_start_callback_script: signal_start_dummy
-  signal_end_callback_script: signal_stop_dummy
+  sensor_device_class: ""
+  signal_start_callback_script: ${sensor_id}_signal_start_dummy
+  signal_end_callback_script: ${sensor_id}_signal_stop_dummy
 
 binary_sensor:
   - platform: gpio
@@ -24,12 +24,12 @@ binary_sensor:
       - script.execute: ${signal_end_callback_script}
 
 script:
-  - id: signal_start_dummy
+  - id: ${sensor_id}_signal_start_dummy
     then:
       - logger.log:
           format: "[START] No script was executed but the dummy instead."
           tag: ${sensor_id}
-  - id: signal_stop_dummy
+  - id: ${sensor_id}_signal_stop_dummy
     then:
       - logger.log:
           format: "[STOP] No script was executed but the dummy instead."

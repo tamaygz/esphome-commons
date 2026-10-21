@@ -1,0 +1,76 @@
+# ULN2003 driven unipolar stepper (e.g. 28BYJ-48). Declares the hardware and includes the generic
+# stepper control layer (stepper_control.yaml) with all sensors, numbers, buttons and scripts.
+#
+# Variables (see stepper_control.yaml for the ones passed through):
+#   stepper_pin_a..d       GPIO pins connected to IN1..IN4 of the driver board
+#   stepper_step_mode      FULL_STEP | HALF_STEP | WAVE_DRIVE
+#   stepper_hold_torque    ON | OFF initial state of the 'Hold Torque' switch. OFF = coils are de-energized
+#                          when the motor is idle (cool, no holding force); ON = coils stay energized.
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  stepper_pin_a: GPIO19
+  stepper_pin_b: GPIO21
+  stepper_pin_c: GPIO22
+  stepper_pin_d: GPIO23
+  stepper_step_mode: FULL_STEP
+  stepper_hold_torque: "OFF"
+  stepper_position_min: "-3000"
+  stepper_position_max: "3000"
+  stepper_move_step: "100"
+  stepper_max_speed: "250"
+  stepper_acceleration: "50"
+  stepper_deceleration: "75"
+  stepper_steps_per_revolution: "2048"
+  stepper_preset_1: "0"
+  stepper_preset_2: "1000"
+  stepper_publish_interval: "500ms"
+
+packages:
+  stepper_control: !include
+    file: stepper_control.yaml
+    vars:
+      stepper_id: ${stepper_id}
+      stepper_name: ${stepper_name}
+      stepper_position_min: ${stepper_position_min}
+      stepper_position_max: ${stepper_position_max}
+      stepper_move_step: ${stepper_move_step}
+      stepper_max_speed: ${stepper_max_speed}
+      stepper_acceleration: ${stepper_acceleration}
+      stepper_deceleration: ${stepper_deceleration}
+      stepper_steps_per_revolution: ${stepper_steps_per_revolution}
+      stepper_preset_1: ${stepper_preset_1}
+      stepper_preset_2: ${stepper_preset_2}
+      stepper_publish_interval: ${stepper_publish_interval}
+
+stepper:
+  - platform: uln2003
+    id: ${stepper_id}
+    pin_a: ${stepper_pin_a}
+    pin_b: ${stepper_pin_b}
+    pin_c: ${stepper_pin_c}
+    pin_d: ${stepper_pin_d}
+    step_mode: ${stepper_step_mode}
+    sleep_when_done: true
+    max_speed: ${stepper_max_speed}steps/s
+    acceleration: ${stepper_acceleration}steps/s^2
+    deceleration: ${stepper_deceleration}steps/s^2
+
+switch:
+  - platform: template
+    id: ${stepper_id}_hold_torque
+    name: "${stepper_name} Hold Torque"
+    icon: mdi:magnet
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_${stepper_hold_torque}
+    entity_category: config
+    turn_on_action:
+      - lambda: 'id(${stepper_id}).set_sleep_when_done(false);'
+    turn_off_action:
+      - lambda: 'id(${stepper_id}).set_sleep_when_done(true);'
+
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: 'id(${stepper_id}).set_sleep_when_done(!id(${stepper_id}_hold_torque).state);'
