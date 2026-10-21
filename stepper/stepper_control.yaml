@@ -46,6 +46,11 @@ globals:
     type: uint32_t
     restore_value: no
     initial_value: '0'
+  # set when a move was accepted; cleared once it has been finalized (see the interval below)
+  - id: ${stepper_id}_move_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: ${stepper_id}_homed
     type: bool
     restore_value: no
@@ -358,43 +363,41 @@ sensor:
     state_class: total_increasing
     entity_category: diagnostic
 
+# finalizes accepted moves independently of the Moving binary sensor edges, so even a very short move
+# persists the position, updates the odometer and releases the idle movement pause
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          int32_t pos = id(${stepper_id}).current_position;
+          int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
+          if (delta != 0) {
+            id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
+            id(${stepper_id}_travel_position) = pos;
+          }
+          if (!id(${stepper_id}).has_reached_target()) return;
+          if (!id(${stepper_id}_move_active) && id(${stepper_id}_pending_travel) == 0) return;
+          id(${stepper_id}_move_active) = false;
+          uint32_t travelled = id(${stepper_id}_pending_travel);
+          id(${stepper_id}_total_steps) += travelled;
+          id(${stepper_id}_pending_travel) = 0;
+          id(${stepper_id}_saved_position) = pos;
+          id(${stepper_id}_total_steps_sensor).publish_state(id(${stepper_id}_total_steps));
+          auto now = id(ha_time).now();
+          if (travelled > 0 && now.is_valid()) {
+            id(${stepper_id}_last_moved).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
+          }
+          ESP_LOGD("${stepper_id}", "Move finished at position %d (%u steps)",
+                   pos, (unsigned) travelled);
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
+
 binary_sensor:
   - platform: template
     id: ${stepper_id}_moving
     name: "${stepper_name} Moving"
     device_class: moving
-    update_interval: 50ms
-    lambda: |-
-      int32_t pos = id(${stepper_id}).current_position;
-      int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
-      if (delta != 0) {
-        id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
-        id(${stepper_id}_travel_position) = pos;
-      }
-      return !id(${stepper_id}).has_reached_target();
-    on_release:
-      then:
-        - lambda: |-
-            // a move has completed: persist the position and update the odometer / diagnostics
-            int32_t pos = id(${stepper_id}).current_position;
-            int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
-            if (delta != 0) {
-              id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
-              id(${stepper_id}_travel_position) = pos;
-            }
-            uint32_t travelled = id(${stepper_id}_pending_travel);
-            id(${stepper_id}_total_steps) += travelled;
-            id(${stepper_id}_pending_travel) = 0;
-            id(${stepper_id}_saved_position) = pos;
-            id(${stepper_id}_total_steps_sensor).publish_state(id(${stepper_id}_total_steps));
-            auto now = id(ha_time).now();
-            if (travelled > 0 && now.is_valid()) {
-              id(${stepper_id}_last_moved).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
-            }
-            ESP_LOGD("${stepper_id}", "Move finished at position %d (%u steps)",
-                     pos, (unsigned) travelled);
-            id(${stepper_id}_idle_movement_paused) =
-              id(${stepper_id}_idle_movement_priority) != 0;
+    lambda: 'return !id(${stepper_id}).has_reached_target();'
   - platform: template
     id: ${stepper_id}_homed_sensor
     name: "${stepper_name} Homed"
@@ -504,6 +507,7 @@ script:
           ESP_LOGD("${stepper_id}", "Moving from %d to %d", id(${stepper_id}).current_position, t);
           id(${stepper_id}_move_start_callbacks).execute();
           id(${stepper_id}).set_target(t);
+          if (!id(${stepper_id}).has_reached_target()) id(${stepper_id}_move_active) = true;
           if (id(${stepper_id}).has_reached_target()) {
             id(${stepper_id}_idle_movement_paused) =
               id(${stepper_id}_idle_movement_priority) != 0;
@@ -538,6 +542,8 @@ script:
     parameters:
       position: int
     then:
+      # cancel running facing / idle movement first: they compare against coordinates that are about to change
+      - script.execute: ${stepper_id}_stop_callbacks
       - lambda: |-
           id(${stepper_id}_move_start_callbacks).execute();
           int32_t current = id(${stepper_id}).current_position;

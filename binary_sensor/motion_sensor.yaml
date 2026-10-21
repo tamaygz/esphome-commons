@@ -56,7 +56,6 @@ binary_sensor:
     id: ${sensor_id}
     name: "${sensor_name}"
     device_class: motion
-    update_interval: 10ms
     lambda: |-
       uint32_t now = millis();
       if (!id(${sensor_id}_enabled).state) {

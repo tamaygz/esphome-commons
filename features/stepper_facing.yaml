@@ -115,6 +115,8 @@ globals:
     type: std::vector<number::Number*>
   - id: ${stepper_id}_tg_taught
     type: std::vector<switch_::Switch*>
+  - id: ${stepper_id}_tg_last_triggered
+    type: std::vector<text_sensor::TextSensor*>
   # index of the source asked for in the teach workflow, -1 = not teaching
   - id: ${stepper_id}_teach_index
     type: int
@@ -762,6 +764,10 @@ script:
             ESP_LOGE("${stepper_id}", "Unknown target source '%s'", source.c_str());
             return;
           }
+          auto stamp = id(ha_time).now();
+          if (stamp.is_valid()) {
+            id(${stepper_id}_tg_last_triggered)[idx]->publish_state(stamp.strftime("%Y-%m-%dT%H:%M:%S%z"));
+          }
           const std::string &label = id(${stepper_id}_tg_labels)[idx];
           const char *reason = nullptr;
           const std::string &state = id(${stepper_id}_face_state);
@@ -1160,6 +1166,13 @@ script:
             return;
           }
           int32_t pos = id(${stepper_id}).current_position;
+          auto &traits = id(${stepper_id}_tg_positions)[i]->traits;
+          if (pos < traits.get_min_value() || pos > traits.get_max_value()) {
+            ESP_LOGW("${stepper_id}", "Teach Confirm rejected: position %d is outside the allowed range %d..%d of '%s'",
+                     (int) pos, (int) traits.get_min_value(), (int) traits.get_max_value(), id(${stepper_id}_tg_labels)[i].c_str());
+            id(${stepper_id}_teach_prompt).publish_state("Position out of range for this source, move the stepper within range and confirm again");
+            return;
+          }
           auto call = id(${stepper_id}_tg_positions)[i]->make_call();
           call.set_value(pos);
           call.perform();

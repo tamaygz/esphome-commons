@@ -211,6 +211,7 @@ script:
                 float dist = id(${stepper_id}_homing_max_distance).state;
                 int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
                 id(${stepper_id}).set_target(id(${stepper_id}).current_position + dir * (int32_t) dist);
+                id(${stepper_id}_move_active) = true;
             - stepper.set_speed:
                 id: ${stepper_id}
                 speed: !lambda 'return id(${stepper_id}_homing_speed).state;'
@@ -218,8 +219,7 @@ script:
                 condition:
                   lambda: |-
                     int phase = id(${stepper_id}_homing_phase);
-                    bool reached = id(${stepper_id})
-                      .has_reached_target();
+                    bool reached = id(${stepper_id}).has_reached_target();
                     return phase == 0 || (phase == 1 && reached);
             - if:
                 condition:
@@ -264,6 +264,7 @@ script:
           int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
           int32_t pos = id(${stepper_id}).current_position;
           id(${stepper_id}).set_target(pos - dir * (int32_t) id(${stepper_id}_homing_backoff).state);
+          id(${stepper_id}_move_active) = true;
       - wait_until:
           condition:
             lambda: 'return id(${stepper_id}_homing_phase) != 2 || id(${stepper_id}).has_reached_target();'

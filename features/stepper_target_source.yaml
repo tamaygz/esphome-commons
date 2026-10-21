@@ -48,6 +48,7 @@ esphome:
             orders.insert(orders.begin() + pos, ${target_order});
             id(${stepper_id}_tg_positions).insert(id(${stepper_id}_tg_positions).begin() + pos, id(${stepper_id}_tg_${target_id}_position));
             id(${stepper_id}_tg_taught).insert(id(${stepper_id}_tg_taught).begin() + pos, id(${stepper_id}_tg_${target_id}_taught));
+            id(${stepper_id}_tg_last_triggered).insert(id(${stepper_id}_tg_last_triggered).begin() + pos, id(${stepper_id}_tg_${target_id}_last_triggered));
 
 number:
   - platform: template
@@ -86,8 +87,15 @@ button:
             ESP_LOGW("${stepper_id}", "Not recording '${target_name}': the stepper is still moving");
             return;
           }
+          int32_t pos = id(${stepper_id}).current_position;
+          auto &traits = id(${stepper_id}_tg_${target_id}_position).traits;
+          if (pos < traits.get_min_value() || pos > traits.get_max_value()) {
+            ESP_LOGW("${stepper_id}", "Not recording '${target_name}': position %d is outside the allowed range %d..%d",
+                     (int) pos, (int) traits.get_min_value(), (int) traits.get_max_value());
+            return;
+          }
           auto call = id(${stepper_id}_tg_${target_id}_position).make_call();
-          call.set_value(id(${stepper_id}).current_position);
+          call.set_value(pos);
           call.perform();
           id(${stepper_id}_tg_${target_id}_taught).turn_on();
           ESP_LOGI("${stepper_id}", "Recorded position %d for '${target_name}'", id(${stepper_id}).current_position);
@@ -121,11 +129,6 @@ script:
   # trigger input of this source (wire motion_start_callback_script to it)
   - id: ${stepper_id}_face_${target_id}
     then:
-      - lambda: |-
-          auto now = id(ha_time).now();
-          if (now.is_valid()) {
-            id(${stepper_id}_tg_${target_id}_last_triggered).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
-          }
       - script.execute:
           id: ${stepper_id}_face_source
           source: "${target_id}"
