@@ -1,9 +1,8 @@
-substitutions:
-  web_user: admin
-  web_password: replaceme123
+# Web Server Configuration
+# Requires web_username and web_password defined in your secrets.yaml file.
 
 web_server:
   auth:
-    username: ${web_user}
-    password: ${web_password}
+    username: !secret web_username
+    password: !secret web_password
   local: true

@@ -1,0 +1,32 @@
+# GPIO endstop / limit switch / hall sensor. Thin wrapper around gpio_sensor.yaml.
+# Use it as home signal of a stepper by wiring the callback to the stepper's home signal script:
+#   endstop_press_callback_script: stepper_motor_home_signal_on
+#   endstop_release_callback_script: stepper_motor_home_signal_off
+#
+# Variables:
+#   endstop_pin       GPIO of the switch (INPUT_PULLUP: connect the switch between the pin and GND)
+#   endstop_inverted  "true": pin LOW = triggered (normally open switch to GND), "false": pin HIGH = triggered
+substitutions:
+  sensor_id: "endstop"
+  sensor_name: "Endstop"
+  endstop_pin: GPIO02
+  endstop_inverted: "true"
+  endstop_press_callback_script: ${sensor_id}_signal_start_dummy
+  endstop_release_callback_script: ${sensor_id}_signal_stop_dummy
+
+packages:
+  endstop: !include
+    file: gpio_sensor.yaml
+    vars:
+      sensor_id: ${sensor_id}
+      sensor_name: ${sensor_name}
+      sensor_pin: ${endstop_pin}
+      sensor_device_class: ""
+      signal_start_callback_script: ${endstop_press_callback_script}
+      signal_end_callback_script: ${endstop_release_callback_script}
+
+binary_sensor:
+  - id: !extend ${sensor_id}
+    trigger_on_initial_state: true
+    pin:
+      inverted: ${endstop_inverted}

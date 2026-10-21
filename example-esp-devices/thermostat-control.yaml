@@ -32,18 +32,18 @@ substitutions:
   log_level: debug
 
 packages:
-  base: !include common/device_base_esp8266.yaml
-  web_server: !include common/web_server.yaml
+  base: !include ../device_base_esp8266.yaml
+  web_server: !include ../web_server.yaml
   sleepmode: !include
-    file: common/features/sleepfunc.yaml
+    file: ../features/sleepfunc.yaml
     vars:
       sleepmode_engage_callback_script: callback_gotosleep
   maxactive: !include
-    file: common/features/maximumactive.yaml
+    file: ../features/maximumactive.yaml
     vars:
-      monitored_switch: relayswitch
+      monitored_switch: ${name}_relay
   thermostatrelay: !include
-    file: common/features/relay01s.yaml
+    file: ../switch/relay01s.yaml
     vars:
       relay_id: "${name}_relay"
       relay_name: "${friendly_name} Relay"
@@ -54,7 +54,6 @@ packages:
 script:
   - id: callback_gotosleep
     then:
-      - switch.turn_off: relayswitch
-
+      - switch.turn_off: ${name}_relay
 
 ### @todo: add features/scheduler, features/temperature_control
