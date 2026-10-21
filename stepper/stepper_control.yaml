@@ -51,6 +51,10 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: ${stepper_id}_move_accepted
+    type: bool
+    restore_value: no
+    initial_value: 'false'
   - id: ${stepper_id}_homed
     type: bool
     restore_value: no
@@ -60,6 +64,10 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  - id: ${stepper_id}_homing_direction
+    type: int
+    restore_value: no
+    initial_value: '-1'
   # bit flags: facing=1, homing=2, teaching=4
   - id: ${stepper_id}_idle_movement_priority
     type: int
@@ -480,6 +488,7 @@ script:
       target: int
     then:
       - lambda: |-
+          id(${stepper_id}_move_accepted) = false;
           int32_t pos = id(${stepper_id}).current_position;
           int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
           if (delta != 0) {
@@ -512,6 +521,7 @@ script:
             id(${stepper_id}_idle_movement_paused) =
               id(${stepper_id}_idle_movement_priority) != 0;
           }
+          id(${stepper_id}_move_accepted) = true;
 
   - id: ${stepper_id}_move_relative
     parameters:
@@ -543,6 +553,7 @@ script:
       position: int
     then:
       # cancel running facing / idle movement first: they compare against coordinates that are about to change
+      - lambda: 'id(${stepper_id}_homing_phase) = 0;'
       - script.execute: ${stepper_id}_stop_callbacks
       - lambda: |-
           id(${stepper_id}_move_start_callbacks).execute();

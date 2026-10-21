@@ -191,13 +191,15 @@ script:
                 tag: ${stepper_id}
             - script.execute: ${stepper_id}_home_manual
           else:
+            - script.execute: ${stepper_id}_stop
             - lambda: |-
                 id(${stepper_id}_idle_movement_priority) |= 2;
                 id(${stepper_id}_homed) = false;
                 id(${stepper_id}_homing_phase) = 1;
                 id(${stepper_id}_homing_result).publish_state("Searching");
                 float dist = id(${stepper_id}_homing_max_distance).state;
-                int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
+                id(${stepper_id}_homing_direction) = id(${stepper_id}_homing_positive).state ? 1 : -1;
+                int32_t dir = id(${stepper_id}_homing_direction);
                 ESP_LOGI("${stepper_id}", "Homing started towards %s, max %d steps", dir > 0 ? "positive" : "negative", (int) dist);
             - script.execute: ${stepper_id}_move_start_callbacks
             - lambda: |-
@@ -209,7 +211,7 @@ script:
                   id(${stepper_id}_travel_position) = pos;
                 }
                 float dist = id(${stepper_id}_homing_max_distance).state;
-                int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
+                int32_t dir = id(${stepper_id}_homing_direction);
                 id(${stepper_id}).set_target(id(${stepper_id}).current_position + dir * (int32_t) dist);
                 id(${stepper_id}_move_active) = true;
             - stepper.set_speed:
@@ -250,7 +252,6 @@ script:
       - lambda: |-
           id(${stepper_id}_homing_phase) = 2;
           id(${stepper_id}_homing_result).publish_state("Backing off");
-          int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
           int32_t pos = id(${stepper_id}).current_position;
           ESP_LOGI("${stepper_id}", "Home signal at position %d, backing off", pos);
       - lambda: |-
@@ -261,7 +262,7 @@ script:
               (uint32_t) (delta < 0 ? -delta : delta);
             id(${stepper_id}_travel_position) = delta_pos;
           }
-          int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
+          int32_t dir = id(${stepper_id}_homing_direction);
           int32_t pos = id(${stepper_id}).current_position;
           id(${stepper_id}).set_target(pos - dir * (int32_t) id(${stepper_id}_homing_backoff).state);
           id(${stepper_id}_move_active) = true;

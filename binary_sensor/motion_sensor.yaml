@@ -86,7 +86,8 @@ binary_sensor:
       return id(${sensor_id}_logical_state);
     on_press:
       - lambda: |-
-          id(${sensor_id}_press_time) = millis() | 1U;  // never 0
+          uint32_t press_now = millis();
+          id(${sensor_id}_press_time) = press_now - ((press_now & 1U) == 0 ? 1U : 0U);
           id(${sensor_id}_detections)++;
           id(${sensor_id}_detections_sensor).publish_state(id(${sensor_id}_detections));
           auto now = id(ha_time).now();

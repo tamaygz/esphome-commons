@@ -863,39 +863,51 @@ script:
       - script.execute:
           id: ${stepper_id}_move_to
           target: !lambda 'return (int) id(${stepper_id}_tg_positions)[id(${stepper_id}_face_current)]->state;'
-      # the soft limits may have clamped the target: remember what was really set
-      - lambda: 'id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;'
-      - wait_until:
-          condition:
-            lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected) || id(${stepper_id}).has_reached_target();'
       - if:
           condition:
-            lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected);'
+            lambda: 'return !id(${stepper_id}_move_accepted);'
           then:
             - script.execute:
                 id: ${stepper_id}_face_abort
                 state: "aborted"
-                reason: "manual_override"
-          else:
-            - lambda: |-
-                id(${stepper_id}_face_arrived_ms) = millis();
-                float lo = id(${stepper_id}_hold_min).state;
-                float hi = id(${stepper_id}_hold_max).state;
-                float secs = hi > lo ? lo + random_float() * (hi - lo) : lo;
-                id(${stepper_id}_face_hold_ms) = (uint32_t) (secs * 1000.0f);
-            - script.execute:
-                id: ${stepper_id}_face_set_state
-                state: "facing_target"
-                reason: "target_reached"
+                reason: "move_rejected"
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_move_accepted);'
+          then:
+            # the soft limits may have clamped the target: remember what was really set
+            - lambda: 'id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;'
+            - wait_until:
+                condition:
+                  lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected) || id(${stepper_id}).has_reached_target();'
             - if:
                 condition:
-                  lambda: |-
-                    return id(${stepper_id}_return_idle).state || id(${stepper_id}_face_force_return);
+                  lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected);'
                 then:
-                  - script.execute: ${stepper_id}_face_resume_idle
+                  - script.execute:
+                      id: ${stepper_id}_face_abort
+                      state: "aborted"
+                      reason: "manual_override"
                 else:
-                  # nothing to return to: the action is done at the target
-                  - script.execute: ${stepper_id}_face_finish
+                  - lambda: |-
+                      id(${stepper_id}_face_arrived_ms) = millis();
+                      float lo = id(${stepper_id}_hold_min).state;
+                      float hi = id(${stepper_id}_hold_max).state;
+                      float secs = hi > lo ? lo + random_float() * (hi - lo) : lo;
+                      id(${stepper_id}_face_hold_ms) = (uint32_t) (secs * 1000.0f);
+                  - script.execute:
+                      id: ${stepper_id}_face_set_state
+                      state: "facing_target"
+                      reason: "target_reached"
+                  - if:
+                      condition:
+                        lambda: |-
+                          return id(${stepper_id}_return_idle).state || id(${stepper_id}_face_force_return);
+                      then:
+                        - script.execute: ${stepper_id}_face_resume_idle
+                      else:
+                        # nothing to return to: the action is done at the target
+                        - script.execute: ${stepper_id}_face_finish
 
   # facing_target -> wait for the return condition -> resuming_idle -> idle
   - id: ${stepper_id}_face_resume_idle
@@ -977,30 +989,42 @@ script:
             - script.execute:
                 id: ${stepper_id}_move_to
                 target: !lambda 'return id(${stepper_id}_face_idle_target);'
-            - lambda: |-
-                id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;
-                id(${stepper_id}_face_force_return) = false;
-                id(${stepper_id}_face_return_reason) = "";
-            - wait_until:
-                condition:
-                  lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected) || id(${stepper_id}).has_reached_target();'
             - if:
                 condition:
-                  lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected);'
+                  lambda: 'return !id(${stepper_id}_move_accepted);'
                 then:
                   - script.execute:
                       id: ${stepper_id}_face_abort
                       state: "aborted"
-                      reason: "manual_override"
-                else:
-                  - script.execute:
-                      id: ${stepper_id}_face_set_state
-                      state: "idle"
-                      reason: "idle_reached"
-                  - script.execute: ${stepper_id}_face_finish
+                      reason: "move_rejected"
+            - if:
+                condition:
+                  lambda: 'return id(${stepper_id}_move_accepted);'
+                then:
                   - lambda: |-
-                      id(${stepper_id}_face_current) = -1;
-                      id(${stepper_id}_facing_current_target).publish_state("none");
+                      id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;
+                      id(${stepper_id}_face_force_return) = false;
+                      id(${stepper_id}_face_return_reason) = "";
+                  - wait_until:
+                      condition:
+                        lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected) || id(${stepper_id}).has_reached_target();'
+                  - if:
+                      condition:
+                        lambda: 'return id(${stepper_id}).target_position != id(${stepper_id}_face_expected);'
+                      then:
+                        - script.execute:
+                            id: ${stepper_id}_face_abort
+                            state: "aborted"
+                            reason: "manual_override"
+                      else:
+                        - script.execute:
+                            id: ${stepper_id}_face_set_state
+                            state: "idle"
+                            reason: "idle_reached"
+                        - script.execute: ${stepper_id}_face_finish
+                        - lambda: |-
+                            id(${stepper_id}_face_current) = -1;
+                            id(${stepper_id}_facing_current_target).publish_state("none");
 
   # the facing action is done: back to the general speed profile, start the cooldown
   - id: ${stepper_id}_face_finish
