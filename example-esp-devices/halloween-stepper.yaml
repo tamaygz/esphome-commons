@@ -15,6 +15,10 @@
 # - endstop: GPIO limit switch wired to the home signal. Remove it (and wire your own signal to the
 #   scripts above) if you have no endstop; manual homing keeps working.
 # - motion: PIR on GPIO4 with last detected / duration / detection counter and HA configurable delays.
+# - facing + target_motion / target_external: the stepper faces the source that signals. The PIR is source
+#   'motion_detected' (via motion_start_callback_script), 'external' is triggered from HA with the action
+#   esphome.halloween1_stepper_motor_face_source (source: external). Record the positions with the
+#   'Teach Start' / 'Teach Confirm' buttons; facing refuses to move to sources that were never taught.
 
 substitutions:
   id: halloween1
@@ -72,3 +76,28 @@ packages:
       sensor_pin: GPIO4
       mtime_on: "250"
       mtime_off: "3000"
+      motion_start_callback_script: stepper_motor_face_motion_detected
+
+  facing: !include
+    file: common/features/stepper_facing.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_facing_enabled: "ON"
+      stepper_facing_lock_time: "5"
+
+  target_motion: !include
+    file: common/features/stepper_target_source.yaml
+    vars:
+      stepper_id: stepper_motor
+      target_id: motion_detected
+      target_name: "Motion"
+      target_order: "1"
+
+  target_external: !include
+    file: common/features/stepper_target_source.yaml
+    vars:
+      stepper_id: stepper_motor
+      target_id: external
+      target_name: "External"
+      target_order: "2"

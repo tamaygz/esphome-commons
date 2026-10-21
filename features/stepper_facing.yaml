@@ -1,0 +1,437 @@
+# "Face the target source" for a stepper (see stepper/uln2003.yaml, stepper/a4988.yaml).
+#
+# Registers 0..n *target sources* (features/stepper_target_source.yaml, include it once per source). Whenever a
+# source signals, the stepper turns to the position that was recorded for that source. A source is either
+#   - a motion sensor on this device: wire its start callback to the script
+#       ${stepper_id}_face_<target_id>          (e.g. motion_start_callback_script: ${stepper_id}_face_front)
+#   - an external trigger (HA automation, other device, ...): call the API action / script
+#       ${stepper_id}_face_source  with  source: "<target_id>"
+#     in HA: action esphome.<node>_${stepper_id}_face_source
+#
+# POSITIONS are recorded with the interactive TEACH workflow (also persisted across reboots):
+#   1. 'Teach Start'    -> the stepper moves to the first source (if it was taught before)
+#   2. move the stepper with the move buttons / target number until it faces the source
+#   3. 'Teach Confirm'  -> the current position is stored for that source and the next source is prompted
+#      ('Teach Skip' keeps the stored position of that source, 'Teach Cancel' aborts)
+#   The 'Teach Prompt' text sensor tells which source is currently asked for.
+#   The same is available as API actions ${stepper_id}_teach_start / _teach_confirm / _teach_skip / _teach_cancel.
+#   Single sources can also be recorded with their own 'Record <name> Position' button.
+# While teaching, facing is suspended so a triggering sensor does not move the motor away.
+#
+# If 'Face Target Source' is enabled but a source was never taught, nothing moves for that source, a warning is
+# logged on boot and for every blocked trigger, the 'Teach Required' problem sensor turns on and the 'Facing
+# Status' text sensor reports it.
+#
+# Positions are stored in the coordinate system of the stepper: home the stepper (features/stepper_homing.yaml)
+# the same way before using them, and re-teach after changing the home position.
+#
+# Variables:
+#   stepper_facing_enabled    "ON"|"OFF" initial value of the 'Face Target Source' switch
+#   stepper_facing_lock_time  seconds the currently faced source is held: triggers of *other* sources are
+#                             ignored for this long after the last trigger of the current one (0 = always follow
+#                             the latest trigger). Initial value of the 'Face Lock Time' number.
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  stepper_facing_enabled: "ON"
+  stepper_facing_lock_time: "0"
+
+# registry, filled by the source packages (parallel vectors, sorted by their 'order')
+globals:
+  - id: ${stepper_id}_tg_ids
+    type: std::vector<std::string>
+  - id: ${stepper_id}_tg_labels
+    type: std::vector<std::string>
+  - id: ${stepper_id}_tg_orders
+    type: std::vector<int>
+  - id: ${stepper_id}_tg_positions
+    type: std::vector<number::Number*>
+  - id: ${stepper_id}_tg_taught
+    type: std::vector<switch_::Switch*>
+  # index of the source asked for in the teach workflow, -1 = not teaching
+  - id: ${stepper_id}_teach_index
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: ${stepper_id}_teach_recorded
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # index of the source that is currently faced, -1 = none
+  - id: ${stepper_id}_face_current
+    type: int
+    restore_value: no
+    initial_value: '-1'
+  - id: ${stepper_id}_face_last_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  # scratch values handed from a lambda to the following actions
+  - id: ${stepper_id}_tg_go
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_tg_target
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+esphome:
+  on_boot:
+    - priority: -300
+      then:
+        - lambda: |-
+            id(${stepper_id}_teach_prompt).publish_state("Not teaching");
+            size_t n = id(${stepper_id}_tg_ids).size();
+            int missing = 0;
+            for (auto *sw : id(${stepper_id}_tg_taught)) {
+              if (!sw->state) missing++;
+            }
+            if (id(${stepper_id}_facing_enabled).state) {
+              if (n == 0) {
+                ESP_LOGW("${stepper_id}", "Facing is enabled but no target source is registered");
+              } else if (missing > 0) {
+                ESP_LOGW("${stepper_id}", "Facing is enabled but %d of %d target sources were never taught. Run the 'Teach Start' workflow.", missing, (int) n);
+              }
+            }
+
+api:
+  actions:
+    - action: ${stepper_id}_face_source
+      variables:
+        source: string
+      then:
+        - script.execute:
+            id: ${stepper_id}_face_source
+            source: !lambda 'return source;'
+    - action: ${stepper_id}_teach_start
+      then:
+        - script.execute: ${stepper_id}_teach_start
+    - action: ${stepper_id}_teach_confirm
+      then:
+        - script.execute: ${stepper_id}_teach_confirm
+    - action: ${stepper_id}_teach_skip
+      then:
+        - script.execute: ${stepper_id}_teach_skip
+    - action: ${stepper_id}_teach_cancel
+      then:
+        - script.execute: ${stepper_id}_teach_cancel
+
+switch:
+  - platform: template
+    id: ${stepper_id}_facing_enabled
+    name: "${stepper_name} Face Target Source"
+    icon: mdi:face-recognition
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_${stepper_facing_enabled}
+    entity_category: config
+    on_turn_on:
+      - lambda: |-
+          for (auto *sw : id(${stepper_id}_tg_taught)) {
+            if (!sw->state) {
+              ESP_LOGW("${stepper_id}", "Facing enabled, but not all target sources were taught. Run the 'Teach Start' workflow.");
+              break;
+            }
+          }
+
+number:
+  - platform: template
+    id: ${stepper_id}_face_lock_time
+    name: "${stepper_name} Face Lock Time"
+    icon: mdi:lock-clock
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 3600
+    step: 1
+    mode: box
+    initial_value: ${stepper_facing_lock_time}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+button:
+  - platform: template
+    id: ${stepper_id}_btn_teach_start
+    name: "${stepper_name} Teach Start"
+    icon: mdi:school-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_start
+  - platform: template
+    id: ${stepper_id}_btn_teach_confirm
+    name: "${stepper_name} Teach Confirm"
+    icon: mdi:check-circle-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_confirm
+  - platform: template
+    id: ${stepper_id}_btn_teach_skip
+    name: "${stepper_name} Teach Skip"
+    icon: mdi:skip-next-circle-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_skip
+  - platform: template
+    id: ${stepper_id}_btn_teach_cancel
+    name: "${stepper_name} Teach Cancel"
+    icon: mdi:close-circle-outline
+    entity_category: config
+    on_press:
+      - script.execute: ${stepper_id}_teach_cancel
+
+sensor:
+  - platform: template
+    id: ${stepper_id}_sources_taught
+    name: "${stepper_name} Taught Sources"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      int taught = 0;
+      for (auto *sw : id(${stepper_id}_tg_taught)) {
+        if (sw->state) taught++;
+      }
+      return taught;
+  - platform: template
+    id: ${stepper_id}_sources_registered
+    name: "${stepper_name} Registered Sources"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return id(${stepper_id}_tg_ids).size();'
+
+binary_sensor:
+  # on = facing is enabled but at least one source (or all, when none registered) is not taught
+  - platform: template
+    id: ${stepper_id}_teach_required
+    name: "${stepper_name} Teach Required"
+    icon: mdi:alert-circle-outline
+    device_class: problem
+    lambda: |-
+      if (!id(${stepper_id}_facing_enabled).state) return false;
+      if (id(${stepper_id}_tg_ids).empty()) return true;
+      for (auto *sw : id(${stepper_id}_tg_taught)) {
+        if (!sw->state) return true;
+      }
+      return false;
+
+text_sensor:
+  - platform: template
+    id: ${stepper_id}_facing_status
+    name: "${stepper_name} Facing Status"
+    icon: mdi:state-machine
+    update_interval: 1s
+    lambda: |-
+      static std::string last;
+      auto &ids = id(${stepper_id}_tg_ids);
+      std::string s;
+      if (id(${stepper_id}_teach_index) >= 0) {
+        s = "Teaching";
+      } else if (!id(${stepper_id}_facing_enabled).state) {
+        s = "Disabled";
+      } else if (ids.empty()) {
+        s = "Error: no target source registered";
+      } else {
+        int missing = 0;
+        for (auto *sw : id(${stepper_id}_tg_taught)) {
+          if (!sw->state) missing++;
+        }
+        if (missing > 0) {
+          s = "Teach required: " + to_string(missing) + " of " + to_string(ids.size()) + " sources not taught";
+        } else if (id(${stepper_id}_face_current) >= 0) {
+          s = "Facing " + id(${stepper_id}_tg_labels)[id(${stepper_id}_face_current)];
+        } else {
+          s = "Ready";
+        }
+      }
+      if (s == last) return {};
+      last = s;
+      return s;
+  - platform: template
+    id: ${stepper_id}_facing_target
+    name: "${stepper_name} Last Faced Source"
+    icon: mdi:target-account
+    entity_category: diagnostic
+  - platform: template
+    id: ${stepper_id}_teach_prompt
+    name: "${stepper_name} Teach Prompt"
+    icon: mdi:message-processing-outline
+  - platform: template
+    id: ${stepper_id}_last_taught
+    name: "${stepper_name} Last Taught"
+    icon: mdi:clock-check-outline
+    device_class: timestamp
+    entity_category: diagnostic
+
+script:
+  # --- facing -----------------------------------------------------------
+  - id: ${stepper_id}_face_source
+    parameters:
+      source: string
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          auto &ids = id(${stepper_id}_tg_ids);
+          int idx = -1;
+          for (size_t i = 0; i < ids.size(); i++) {
+            if (ids[i] == source) { idx = (int) i; break; }
+          }
+          if (idx < 0) {
+            ESP_LOGE("${stepper_id}", "Unknown target source '%s'", source.c_str());
+            return;
+          }
+          const std::string &label = id(${stepper_id}_tg_labels)[idx];
+          if (!id(${stepper_id}_facing_enabled).state) {
+            ESP_LOGD("${stepper_id}", "Facing disabled, ignoring trigger of '%s'", label.c_str());
+            return;
+          }
+          if (id(${stepper_id}_teach_index) >= 0) {
+            ESP_LOGD("${stepper_id}", "Teaching in progress, ignoring trigger of '%s'", label.c_str());
+            return;
+          }
+          if (!id(${stepper_id}_tg_taught)[idx]->state) {
+            ESP_LOGW("${stepper_id}", "Target source '%s' was never taught, not moving. Run the 'Teach Start' workflow.", label.c_str());
+            return;
+          }
+          uint32_t lock_ms = (uint32_t) (id(${stepper_id}_face_lock_time).state * 1000.0f);
+          int cur = id(${stepper_id}_face_current);
+          if (lock_ms > 0 && cur >= 0 && cur != idx && (millis() - id(${stepper_id}_face_last_ms)) < lock_ms) {
+            ESP_LOGD("${stepper_id}", "'%s' is held, ignoring trigger of '%s'", id(${stepper_id}_tg_labels)[cur].c_str(), label.c_str());
+            return;
+          }
+          id(${stepper_id}_face_current) = idx;
+          id(${stepper_id}_face_last_ms) = millis();
+          id(${stepper_id}_tg_target) = (int) id(${stepper_id}_tg_positions)[idx]->state;
+          id(${stepper_id}_tg_go) = true;
+          id(${stepper_id}_facing_target).publish_state(label);
+          ESP_LOGI("${stepper_id}", "Facing '%s' (position %d)", label.c_str(), id(${stepper_id}_tg_target));
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute:
+                id: ${stepper_id}_move_to
+                target: !lambda 'return id(${stepper_id}_tg_target);'
+
+  # --- teach workflow -----------------------------------------------------
+  - id: ${stepper_id}_teach_start
+    then:
+      - lambda: |-
+          if (id(${stepper_id}_tg_ids).empty()) {
+            ESP_LOGE("${stepper_id}", "Cannot teach: no target source registered");
+            id(${stepper_id}_teach_prompt).publish_state("Error: no target source registered");
+            id(${stepper_id}_tg_go) = false;
+            return;
+          }
+          if (id(${stepper_id}_homing_phase) != 0) {
+            ESP_LOGW("${stepper_id}", "Cannot teach while homing");
+            id(${stepper_id}_tg_go) = false;
+            return;
+          }
+          id(${stepper_id}_teach_index) = 0;
+          id(${stepper_id}_teach_recorded) = 0;
+          id(${stepper_id}_tg_go) = true;
+          ESP_LOGI("${stepper_id}", "Teach workflow started");
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_teach_enter
+
+  # prepares the prompt for the current source (or finishes the workflow) and moves to the stored position
+  - id: ${stepper_id}_teach_enter
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          auto &ids = id(${stepper_id}_tg_ids);
+          int i = id(${stepper_id}_teach_index);
+          if (i < 0) return;
+          if (i >= (int) ids.size()) {
+            id(${stepper_id}_teach_index) = -1;
+            char done[96];
+            snprintf(done, sizeof(done), "Done: %d of %d source(s) recorded", id(${stepper_id}_teach_recorded), (int) ids.size());
+            id(${stepper_id}_teach_prompt).publish_state(done);
+            if (id(${stepper_id}_teach_recorded) > 0) {
+              auto now = id(ha_time).now();
+              if (now.is_valid()) {
+                id(${stepper_id}_last_taught).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
+              }
+            }
+            ESP_LOGI("${stepper_id}", "Teach workflow finished: %s", done);
+            return;
+          }
+          char buf[200];
+          snprintf(buf, sizeof(buf), "%d/%d '%s': move the stepper to face it, then press Teach Confirm (Skip keeps the stored position)",
+                   i + 1, (int) ids.size(), id(${stepper_id}_tg_labels)[i].c_str());
+          id(${stepper_id}_teach_prompt).publish_state(buf);
+          ESP_LOGI("${stepper_id}", "Teach: %s", buf);
+          if (id(${stepper_id}_tg_taught)[i]->state && id(${stepper_id}_tg_positions)[i]->has_state()) {
+            id(${stepper_id}_tg_target) = (int) id(${stepper_id}_tg_positions)[i]->state;
+            id(${stepper_id}_tg_go) = true;
+          }
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute:
+                id: ${stepper_id}_move_to
+                target: !lambda 'return id(${stepper_id}_tg_target);'
+
+  - id: ${stepper_id}_teach_confirm
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          int i = id(${stepper_id}_teach_index);
+          if (i < 0 || i >= (int) id(${stepper_id}_tg_ids).size()) {
+            ESP_LOGW("${stepper_id}", "Teach Confirm ignored: workflow not started");
+            return;
+          }
+          if (!id(${stepper_id}).has_reached_target()) {
+            ESP_LOGW("${stepper_id}", "Teach Confirm ignored: the stepper is still moving");
+            id(${stepper_id}_teach_prompt).publish_state("Stepper still moving, wait until it stopped and confirm again");
+            return;
+          }
+          int32_t pos = id(${stepper_id}).current_position;
+          auto call = id(${stepper_id}_tg_positions)[i]->make_call();
+          call.set_value(pos);
+          call.perform();
+          id(${stepper_id}_tg_taught)[i]->turn_on();
+          id(${stepper_id}_teach_recorded)++;
+          ESP_LOGI("${stepper_id}", "Recorded position %d for '%s'", (int) pos, id(${stepper_id}_tg_labels)[i].c_str());
+          id(${stepper_id}_teach_index) = i + 1;
+          id(${stepper_id}_tg_go) = true;
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_teach_enter
+
+  - id: ${stepper_id}_teach_skip
+    then:
+      - lambda: |-
+          id(${stepper_id}_tg_go) = false;
+          int i = id(${stepper_id}_teach_index);
+          if (i < 0) {
+            ESP_LOGW("${stepper_id}", "Teach Skip ignored: workflow not started");
+            return;
+          }
+          id(${stepper_id}_teach_index) = i + 1;
+          id(${stepper_id}_tg_go) = true;
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_tg_go);'
+          then:
+            - script.execute: ${stepper_id}_teach_enter
+
+  - id: ${stepper_id}_teach_cancel
+    then:
+      - lambda: |-
+          if (id(${stepper_id}_teach_index) < 0) return;
+          id(${stepper_id}_teach_index) = -1;
+          id(${stepper_id}_teach_prompt).publish_state("Cancelled");
+          ESP_LOGW("${stepper_id}", "Teach workflow cancelled, positions recorded so far are kept");

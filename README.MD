@@ -120,6 +120,15 @@ For more examples check /examples
 - **Variables:** `stepper_id`, `stepper_name`, pins (`stepper_pin_a..d` / `stepper_step_pin`, `stepper_dir_pin`), `stepper_position_min/max`, `stepper_max_speed`, `stepper_acceleration`, `stepper_deceleration`, `stepper_steps_per_revolution`, `stepper_preset_1/2`, and the `stepper_homing_*` variables documented in `features/stepper_homing.yaml`.
 - **Example:** `example-esp-devices/halloween-stepper.yaml`. Requires `time.yaml` (included by the device base) for the timestamp sensors.
 
+### Stepper Facing (move/face to target source)
+
+- **Files:** `common/features/stepper_facing.yaml` (once per stepper), `common/features/stepper_target_source.yaml` (once per source, 0..n times)
+- **Description:** The stepper turns to the position recorded for whichever *target source* signals. A source is a motion sensor on the device (`motion_start_callback_script: <stepper_id>_face_<target_id>`) or an external trigger (HA action `esphome.<node>_<stepper_id>_face_source` with `source: <target_id>`).
+- **Teaching positions (interactive, persisted):** `Teach Start` → move the stepper to face the source → `Teach Confirm` (next source is prompted; `Teach Skip` keeps the stored position, `Teach Cancel` aborts). `Teach Prompt` shows what is asked. Also available as API actions `<stepper_id>_teach_start/_confirm/_skip/_cancel`; each source also has a `Record <name> Position` button and editable `Position`/`Taught` entities. Facing is suspended while teaching.
+- **Safety net:** with `Face Target Source` enabled, sources that were never taught are not moved to; a warning is logged (boot and every blocked trigger), `Teach Required` (problem) turns on and `Facing Status` reports it.
+- **Other entities:** `Face Lock Time` (hold the current source for n seconds), `Taught Sources`, `Registered Sources`, `Last Faced Source`, `Last Taught`, per-source `Last Triggered`.
+- **Variables:** `stepper_facing_enabled`, `stepper_facing_lock_time`; per source `target_id`, `target_name`, `target_order`, `target_default_position`. See `example-esp-devices/halloween-stepper.yaml`.
+
 ### Buttons
 
 - **File:** `common/button/restart.yaml`
