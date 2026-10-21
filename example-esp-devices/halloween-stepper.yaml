@@ -93,7 +93,11 @@ packages:
       stepper_return_idle: "ON"
       stepper_return_mode: "Motion Clear"
       stepper_return_timeout: "60"
-      stepper_idle_position: "0"
+      # back to where it came from (Relative, offset 0); alternatives: "Absolute" or "Random Relative" (offset min/max)
+      stepper_idle_mode: "Relative"
+      stepper_idle_offset: "0"
+      stepper_idle_offset_min: "-100"
+      stepper_idle_offset_max: "100"
       # fast towards the target, slow and smooth back to idle
       stepper_face_speed: "246"
       stepper_idle_speed: "120"

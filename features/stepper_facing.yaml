@@ -33,7 +33,14 @@
 #     extends the hold time.
 #   - Cooldown (default 0): after the action is done signals are ignored for this long. Fixed (Cooldown Min) or a
 #     random time between Cooldown Min and Cooldown Max (when Max > Min), drawn each time.
-#   - Return To Idle (default OFF): after the target was reached the stepper returns to the 'Idle Position'.
+#   - Return To Idle (default OFF): after the target was reached the stepper returns to the idle position.
+#     'Idle Position Mode' selects where that is:
+#       Absolute        the 'Idle Position' number (steps)
+#       Relative        'Idle Offset' steps (signed) relative to the LAST position, i.e. the position the stepper
+#                       had when the facing action started (0 = back where it came from)
+#       Random Relative a random offset between 'Idle Offset Min' and 'Idle Offset Max' (signed, drawn every time)
+#                       relative to the last position
+#     Relative results are limited to the soft limits / position range of the stepper.
 #     'Return Mode' = Motion Clear: when the source is released (<id>_release_source), or
 #     'Return Mode' = Timer: after 'Hold Time Min/Max' (random between both if Max > Min).
 #     'Return Timeout' (0 = off) is a safety limit in both modes, counted from reaching the target, for sources
@@ -61,7 +68,10 @@
 #   stepper_return_mode           "Motion Clear" | "Timer"
 #   stepper_return_hold_min / _max   seconds ('Timer' mode)
 #   stepper_return_timeout        seconds, 0 = off
-#   stepper_idle_position         steps
+#   stepper_idle_mode             "Absolute" | "Relative" | "Random Relative"
+#   stepper_idle_position         steps (Absolute)
+#   stepper_idle_offset           steps, signed (Relative)
+#   stepper_idle_offset_min / _max   steps, signed (Random Relative)
 #   stepper_face_speed / _acceleration / _deceleration   0 = general setting
 #   stepper_idle_speed / _acceleration / _deceleration   0 = general setting
 #   stepper_facing_event          name of the HA event, must start with 'esphome.'
@@ -79,7 +89,12 @@ substitutions:
   stepper_return_hold_min: "10"
   stepper_return_hold_max: "10"
   stepper_return_timeout: "60"
+  stepper_idle_mode: "Absolute"
   stepper_idle_position: "0"
+  stepper_idle_offset: "0"
+  stepper_idle_offset_min: "-100"
+  stepper_idle_offset_max: "100"
+  stepper_idle_offset_limit: "100000"
   stepper_face_speed: "0"
   stepper_face_acceleration: "0"
   stepper_face_deceleration: "0"
@@ -123,6 +138,16 @@ globals:
     type: int
     restore_value: no
     initial_value: '-1'
+  # position when the facing action started ('last position' for relative idle positions)
+  - id: ${stepper_id}_face_origin
+    type: int
+    restore_value: no
+    initial_value: '0'
+  # idle position resolved for the current return
+  - id: ${stepper_id}_face_idle_target
+    type: int
+    restore_value: no
+    initial_value: '0'
   # true from accepting a signal until the facing action is done
   - id: ${stepper_id}_face_busy
     type: bool
@@ -281,6 +306,18 @@ switch:
 
 select:
   - platform: template
+    id: ${stepper_id}_idle_mode
+    name: "${stepper_name} Idle Position Mode"
+    icon: mdi:map-marker-radius-outline
+    options:
+      - "Absolute"
+      - "Relative"
+      - "Random Relative"
+    initial_option: "${stepper_idle_mode}"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
     id: ${stepper_id}_return_mode
     name: "${stepper_name} Return Mode"
     icon: mdi:timer-cog-outline
@@ -373,6 +410,45 @@ number:
     step: 1
     mode: box
     initial_value: ${stepper_idle_position}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_offset
+    name: "${stepper_name} Idle Offset"
+    icon: mdi:arrow-left-right
+    unit_of_measurement: "steps"
+    min_value: -${stepper_idle_offset_limit}
+    max_value: ${stepper_idle_offset_limit}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_offset}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_offset_min
+    name: "${stepper_name} Idle Offset Min"
+    icon: mdi:arrow-collapse-left
+    unit_of_measurement: "steps"
+    min_value: -${stepper_idle_offset_limit}
+    max_value: ${stepper_idle_offset_limit}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_offset_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_offset_max
+    name: "${stepper_name} Idle Offset Max"
+    icon: mdi:arrow-collapse-right
+    unit_of_measurement: "steps"
+    min_value: -${stepper_idle_offset_limit}
+    max_value: ${stepper_idle_offset_limit}
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_offset_max}
     optimistic: true
     restore_value: true
     entity_category: config
@@ -736,6 +812,7 @@ script:
             return;
           }
           id(${stepper_id}_cooldown_active) = false;
+          if (!busy) id(${stepper_id}_face_origin) = id(${stepper_id}).current_position;
           id(${stepper_id}_face_busy) = true;
           id(${stepper_id}_face_current) = idx;
           id(${stepper_id}_face_released) = false;
@@ -885,9 +962,29 @@ script:
             - script.execute:
                 id: ${stepper_id}_face_apply_profile
                 idle: true
+            - lambda: |-
+                int target;
+                int mode = id(${stepper_id}_idle_mode).active_index().value_or(0);
+                if (mode == 0) {
+                  target = (int) id(${stepper_id}_idle_position).state;
+                } else {
+                  int offset = (int) id(${stepper_id}_idle_offset).state;
+                  if (mode == 2) {
+                    int lo = (int) id(${stepper_id}_idle_offset_min).state;
+                    int hi = (int) id(${stepper_id}_idle_offset_max).state;
+                    if (lo > hi) std::swap(lo, hi);
+                    offset = lo + (int) (random_float() * (float) (hi - lo + 1));
+                    if (offset > hi) offset = hi;
+                  }
+                  target = id(${stepper_id}_face_origin) + offset;
+                  if (target < ${stepper_position_min}) target = ${stepper_position_min};
+                  if (target > ${stepper_position_max}) target = ${stepper_position_max};
+                  ESP_LOGD("${stepper_id}", "Idle position: last position %d %+d = %d", id(${stepper_id}_face_origin), offset, target);
+                }
+                id(${stepper_id}_face_idle_target) = target;
             - script.execute:
                 id: ${stepper_id}_move_to
-                target: !lambda 'return (int) id(${stepper_id}_idle_position).state;'
+                target: !lambda 'return id(${stepper_id}_face_idle_target);'
             - lambda: |-
                 id(${stepper_id}_face_expected) = id(${stepper_id}).target_position;
                 id(${stepper_id}_face_force_return) = false;
