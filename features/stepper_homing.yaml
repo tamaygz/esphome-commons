@@ -198,13 +198,27 @@ script:
                 float dist = id(${stepper_id}_homing_max_distance).state;
                 int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
                 ESP_LOGI("${stepper_id}", "Homing started towards %s, max %d steps", dir > 0 ? "positive" : "negative", (int) dist);
+            - lambda: |-
+                int32_t pos = id(${stepper_id}).current_position;
+                int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
+                if (delta != 0) {
+                  id(${stepper_id}_pending_travel) +=
+                    (uint32_t) (delta < 0 ? -delta : delta);
+                  id(${stepper_id}_travel_position) = pos;
+                }
+                float dist = id(${stepper_id}_homing_max_distance).state;
+                int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
                 id(${stepper_id}).set_target(id(${stepper_id}).current_position + dir * (int32_t) dist);
             - stepper.set_speed:
                 id: ${stepper_id}
                 speed: !lambda 'return id(${stepper_id}_homing_speed).state;'
             - wait_until:
                 condition:
-                  lambda: 'return id(${stepper_id}_homing_phase) != 1 || id(${stepper_id}).has_reached_target();'
+                  lambda: |-
+                    int phase = id(${stepper_id}_homing_phase);
+                    bool reached = id(${stepper_id})
+                      .has_reached_target();
+                    return phase == 0 || (phase == 1 && reached);
             - if:
                 condition:
                   lambda: 'return id(${stepper_id}_homing_phase) == 1;'
@@ -233,6 +247,16 @@ script:
           int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
           int32_t pos = id(${stepper_id}).current_position;
           ESP_LOGI("${stepper_id}", "Home signal at position %d, backing off", pos);
+      - lambda: |-
+          int32_t delta_pos = id(${stepper_id}).current_position;
+          int64_t delta = (int64_t) delta_pos - id(${stepper_id}_travel_position);
+          if (delta != 0) {
+            id(${stepper_id}_pending_travel) +=
+              (uint32_t) (delta < 0 ? -delta : delta);
+            id(${stepper_id}_travel_position) = delta_pos;
+          }
+          int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
+          int32_t pos = id(${stepper_id}).current_position;
           id(${stepper_id}).set_target(pos - dir * (int32_t) id(${stepper_id}_homing_backoff).state);
       - wait_until:
           condition:
@@ -243,8 +267,12 @@ script:
           then:
             - script.execute: ${stepper_id}_home_manual
           else:
-            - lambda: 'id(${stepper_id}_homing_result).publish_state("Aborted");'
-            - script.execute: ${stepper_id}_apply_settings
+            - if:
+                condition:
+                  lambda: 'return !id(${stepper_id}_homed);'
+                then:
+                  - lambda: 'id(${stepper_id}_homing_result).publish_state("Aborted");'
+                  - script.execute: ${stepper_id}_apply_settings
 
   # --- manual homing: declare the current position to be home ---------------
   - id: ${stepper_id}_home_manual

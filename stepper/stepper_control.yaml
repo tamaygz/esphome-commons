@@ -38,6 +38,14 @@ globals:
     type: uint32_t
     restore_value: yes
     initial_value: '0'
+  - id: ${stepper_id}_travel_position
+    type: int32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_pending_travel
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
   - id: ${stepper_id}_homed
     type: bool
     restore_value: no
@@ -57,6 +65,8 @@ esphome:
             // and make it the target as well, otherwise the motor would travel to 0 right after boot.
             id(${stepper_id}).report_position(id(${stepper_id}_saved_position));
             id(${stepper_id}).set_target(id(${stepper_id}_saved_position));
+            id(${stepper_id}_travel_position) = id(${stepper_id}_saved_position);
+            id(${stepper_id}_pending_travel) = 0;
             id(${stepper_id}_total_steps_sensor).publish_state(id(${stepper_id}_total_steps));
             ESP_LOGI("${stepper_id}", "Restored position %d", id(${stepper_id}_saved_position));
         - script.execute: ${stepper_id}_apply_settings
@@ -340,21 +350,36 @@ binary_sensor:
     id: ${stepper_id}_moving
     name: "${stepper_name} Moving"
     device_class: moving
-    lambda: 'return !id(${stepper_id}).has_reached_target();'
+    update_interval: 50ms
+    lambda: |-
+      int32_t pos = id(${stepper_id}).current_position;
+      int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
+      if (delta != 0) {
+        id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
+        id(${stepper_id}_travel_position) = pos;
+      }
+      return !id(${stepper_id}).has_reached_target();
     on_release:
       then:
         - lambda: |-
             // a move has completed: persist the position and update the odometer / diagnostics
             int32_t pos = id(${stepper_id}).current_position;
-            int32_t travelled = pos - id(${stepper_id}_saved_position);
-            id(${stepper_id}_total_steps) += (uint32_t) (travelled < 0 ? -travelled : travelled);
+            int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
+            if (delta != 0) {
+              id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
+              id(${stepper_id}_travel_position) = pos;
+            }
+            uint32_t travelled = id(${stepper_id}_pending_travel);
+            id(${stepper_id}_total_steps) += travelled;
+            id(${stepper_id}_pending_travel) = 0;
             id(${stepper_id}_saved_position) = pos;
             id(${stepper_id}_total_steps_sensor).publish_state(id(${stepper_id}_total_steps));
             auto now = id(ha_time).now();
-            if (travelled != 0 && now.is_valid()) {
+            if (travelled > 0 && now.is_valid()) {
               id(${stepper_id}_last_moved).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
             }
-            ESP_LOGD("${stepper_id}", "Move finished at position %d (%d steps)", pos, travelled);
+            ESP_LOGD("${stepper_id}", "Move finished at position %d (%u steps)",
+                     pos, (unsigned) travelled);
   - platform: template
     id: ${stepper_id}_homed_sensor
     name: "${stepper_name} Homed"
@@ -419,6 +444,12 @@ script:
       target: int
     then:
       - lambda: |-
+          int32_t pos = id(${stepper_id}).current_position;
+          int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
+          if (delta != 0) {
+            id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
+            id(${stepper_id}_travel_position) = pos;
+          }
           if (id(${stepper_id}_homing_phase) != 0) {
             ESP_LOGW("${stepper_id}", "Ignoring move to %d: homing in progress (press stop to abort)", target);
             return;
@@ -428,10 +459,14 @@ script:
               id(${stepper_id}_limit_max).has_state()) {
             int32_t lo = (int32_t) id(${stepper_id}_limit_min).state;
             int32_t hi = (int32_t) id(${stepper_id}_limit_max).state;
-            if (lo <= hi) {
-              t = t < lo ? lo : (t > hi ? hi : t);
-              if (t != target) ESP_LOGW("${stepper_id}", "Target %d clamped to soft limit %d", (int) target, (int) t);
+            if (lo > hi) {
+              ESP_LOGE("${stepper_id}",
+                       "Ignoring target %d: soft limit min %d exceeds max %d",
+                       (int) target, (int) lo, (int) hi);
+              return;
             }
+            t = t < lo ? lo : (t > hi ? hi : t);
+            if (t != target) ESP_LOGW("${stepper_id}", "Target %d clamped to soft limit %d", (int) target, (int) t);
           }
           ESP_LOGD("${stepper_id}", "Moving from %d to %d", id(${stepper_id}).current_position, t);
           id(${stepper_id}).set_target(t);
@@ -447,7 +482,14 @@ script:
 
   - id: ${stepper_id}_stop
     then:
+      - script.execute: ${stepper_id}_stop_callbacks
       - lambda: |-
+          int32_t pos = id(${stepper_id}).current_position;
+          int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
+          if (delta != 0) {
+            id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
+            id(${stepper_id}_travel_position) = pos;
+          }
           id(${stepper_id}_homing_phase) = 0;
           id(${stepper_id}).set_target(id(${stepper_id}).current_position);
           ESP_LOGI("${stepper_id}", "Stopped at position %d", id(${stepper_id}).current_position);
@@ -457,8 +499,18 @@ script:
       position: int
     then:
       - lambda: |-
+          int32_t current = id(${stepper_id}).current_position;
+          int64_t delta = (int64_t) current - id(${stepper_id}_travel_position);
+          if (delta != 0) {
+            id(${stepper_id}_pending_travel) += (uint32_t) (delta < 0 ? -delta : delta);
+          }
           // redefine where the motor currently is (no movement); keeps the odometer consistent
           id(${stepper_id}).report_position(position);
           id(${stepper_id}).set_target(position);
           id(${stepper_id}_saved_position) = position;
+          id(${stepper_id}_travel_position) = position;
           ESP_LOGI("${stepper_id}", "Current position set to %d", (int) position);
+
+  - id: ${stepper_id}_stop_callbacks
+    then:
+      - lambda: 'return;'

@@ -27,5 +27,6 @@ packages:
 
 binary_sensor:
   - id: !extend ${sensor_id}
+    trigger_on_initial_state: true
     pin:
       inverted: ${endstop_inverted}

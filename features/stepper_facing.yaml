@@ -900,7 +900,8 @@ script:
                 reason: "target_reached"
             - if:
                 condition:
-                  switch.is_on: ${stepper_id}_return_idle
+                  lambda: |-
+                    return id(${stepper_id}_return_idle).state || id(${stepper_id}_face_force_return);
                 then:
                   - script.execute: ${stepper_id}_face_resume_idle
                 else:
@@ -1034,6 +1035,11 @@ script:
       reason: string
     then:
       - lambda: |-
+          bool owns_target = id(${stepper_id}_face_busy) && id(${stepper_id}_homing_phase) == 0;
+          owns_target = owns_target && id(${stepper_id}).target_position == id(${stepper_id}_face_expected);
+          if (owns_target) {
+            id(${stepper_id}).set_target(id(${stepper_id}).current_position);
+          }
           id(${stepper_id}_face_busy) = false;
           id(${stepper_id}_face_force_return) = false;
           id(${stepper_id}_face_return_reason) = "";
@@ -1050,6 +1056,22 @@ script:
             lambda: 'return id(${stepper_id}_homing_phase) == 0;'
           then:
             - script.execute: ${stepper_id}_apply_settings
+
+  # Stop the facing workflow before the generic stop changes its target.
+  - id: !extend ${stepper_id}_stop_callbacks
+    then:
+      - script.stop: ${stepper_id}_face_run
+      - script.stop: ${stepper_id}_face_resume_idle
+      - if:
+          condition:
+            lambda: |-
+              auto &state = id(${stepper_id}_face_state);
+              return state != "idle" && state != "disabled" && state != "aborted";
+          then:
+            - script.execute:
+                id: ${stepper_id}_face_abort
+                state: "aborted"
+                reason: "manual"
 
   # --- teach workflow -----------------------------------------------------
   - id: ${stepper_id}_teach_start
