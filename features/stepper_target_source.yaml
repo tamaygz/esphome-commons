@@ -6,7 +6,11 @@
 #
 # Triggering:
 #   motion sensor on this device:  motion_start_callback_script: ${stepper_id}_face_${target_id}
-#   external trigger (HA, ...):    call ${stepper_id}_face_source with source: "${target_id}"
+#                                  motion_end_callback_script:   ${stepper_id}_release_${target_id}
+#   external trigger (HA, ...):    call ${stepper_id}_face_source / ${stepper_id}_release_source
+#                                  with source: "${target_id}"
+# The release (signal cleared) is optional, it is used by 'Return Mode' = Motion Clear of the stepper_facing
+# feature. Without it the stepper returns by the 'Return Timeout' (or in 'Timer' mode).
 #
 # Variables:
 #   target_id               unique id of the source (letters, digits, underscore)
@@ -124,4 +128,10 @@ script:
           }
       - script.execute:
           id: ${stepper_id}_face_source
+          source: "${target_id}"
+  # release input of this source (wire motion_end_callback_script to it)
+  - id: ${stepper_id}_release_${target_id}
+    then:
+      - script.execute:
+          id: ${stepper_id}_release_source
           source: "${target_id}"

@@ -77,6 +77,7 @@ packages:
       mtime_on: "250"
       mtime_off: "3000"
       motion_start_callback_script: stepper_motor_face_motion_detected
+      motion_end_callback_script: stepper_motor_release_motion_detected
 
   facing: !include
     file: common/features/stepper_facing.yaml
@@ -84,7 +85,20 @@ packages:
       stepper_id: stepper_motor
       stepper_name: "Stepper"
       stepper_facing_enabled: "ON"
-      stepper_facing_lock_time: "5"
+      # finish moving to the target, then wait 5-15 s before accepting the next signal
+      stepper_facing_interruptible: "OFF"
+      stepper_facing_cooldown_min: "5"
+      stepper_facing_cooldown_max: "15"
+      # return to the idle position when motion clears (at the latest after 60 s)
+      stepper_return_idle: "ON"
+      stepper_return_mode: "Motion Clear"
+      stepper_return_timeout: "60"
+      stepper_idle_position: "0"
+      # fast towards the target, slow and smooth back to idle
+      stepper_face_speed: "246"
+      stepper_idle_speed: "120"
+      stepper_idle_acceleration: "30"
+      stepper_idle_deceleration: "30"
 
   target_motion: !include
     file: common/features/stepper_target_source.yaml
