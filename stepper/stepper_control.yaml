@@ -430,6 +430,24 @@ text_sensor:
 # scripts
 # ---------------------------------------------------------------------------
 script:
+  - id: ${stepper_id}_apply_motion_profile
+    parameters:
+      speed: float
+      acceleration: float
+      deceleration: float
+    then:
+      - lambda: |-
+          if (!(speed > 0)) speed = id(${stepper_id}_max_speed).state;
+          if (!(acceleration > 0)) acceleration = id(${stepper_id}_acceleration).state;
+          if (!(deceleration > 0)) deceleration = id(${stepper_id}_deceleration).state;
+          auto *stepper = id(${stepper_id});
+          if (speed > 0) stepper->set_max_speed(speed);
+          if (acceleration > 0) stepper->set_acceleration(acceleration);
+          if (deceleration > 0) stepper->set_deceleration(deceleration);
+          stepper->on_update_speed();
+          ESP_LOGD("${stepper_id}", "Motion profile: %.0f steps/s, %.0f / %.0f steps/s^2",
+                   speed, acceleration, deceleration);
+
   - id: ${stepper_id}_apply_settings
     then:
       - if:

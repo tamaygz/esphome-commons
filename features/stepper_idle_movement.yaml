@@ -329,18 +329,12 @@ script:
               return id(${stepper_id}_idle_movement_run_allowed) &&
                      id(${stepper_id}_idle_movement_target) != id(${stepper_id}).current_position;
           then:
+            - script.execute:
+                id: ${stepper_id}_apply_motion_profile
+                speed: !lambda 'return id(${stepper_id}_idle_movement_speed).state;'
+                acceleration: !lambda 'return id(${stepper_id}_idle_movement_acceleration).state;'
+                deceleration: !lambda 'return id(${stepper_id}_idle_movement_deceleration).state;'
             - lambda: |-
-                float speed = id(${stepper_id}_idle_movement_speed).state;
-                float acc = id(${stepper_id}_idle_movement_acceleration).state;
-                float dec = id(${stepper_id}_idle_movement_deceleration).state;
-                auto *stepper = id(${stepper_id});
-                if (!(speed > 0)) speed = id(${stepper_id}_max_speed).state;
-                if (!(acc > 0)) acc = id(${stepper_id}_acceleration).state;
-                if (!(dec > 0)) dec = id(${stepper_id}_deceleration).state;
-                if (speed > 0) stepper->set_max_speed(speed);
-                if (acc > 0) stepper->set_acceleration(acc);
-                if (dec > 0) stepper->set_deceleration(dec);
-                stepper->on_update_speed();
                 id(${stepper_id}_idle_movement_issuing) = true;
             - script.execute:
                 id: ${stepper_id}_move_to

@@ -744,27 +744,6 @@ script:
             reason: !lambda 'return reason;'
             position: !lambda 'return to_string(id(${stepper_id}).current_position);'
 
-  # --- speed profiles -------------------------------------------------------
-  # idle: false = profile for facing the target, true = profile for resuming the idle position.
-  # 0 in the profile = use the general setting of the stepper.
-  - id: ${stepper_id}_face_apply_profile
-    parameters:
-      idle: bool
-    then:
-      - lambda: |-
-          float speed = idle ? id(${stepper_id}_idle_speed).state : id(${stepper_id}_face_speed).state;
-          float acc = idle ? id(${stepper_id}_idle_acceleration).state : id(${stepper_id}_face_acceleration).state;
-          float dec = idle ? id(${stepper_id}_idle_deceleration).state : id(${stepper_id}_face_deceleration).state;
-          if (!(speed > 0)) speed = id(${stepper_id}_max_speed).state;
-          if (!(acc > 0)) acc = id(${stepper_id}_acceleration).state;
-          if (!(dec > 0)) dec = id(${stepper_id}_deceleration).state;
-          auto *s = id(${stepper_id});
-          if (speed > 0) s->set_max_speed(speed);
-          if (acc > 0) s->set_acceleration(acc);
-          if (dec > 0) s->set_deceleration(dec);
-          s->on_update_speed();
-          ESP_LOGD("${stepper_id}", "%s profile: %.0f steps/s, %.0f / %.0f steps/s^2", idle ? "Idle" : "Face", speed, acc, dec);
-
   # --- facing ---------------------------------------------------------------
   # entry point of every source: decides if a signal is accepted
   - id: ${stepper_id}_face_source
@@ -871,8 +850,10 @@ script:
           state: "moving_to_target"
           reason: "signal"
       - script.execute:
-          id: ${stepper_id}_face_apply_profile
-          idle: false
+          id: ${stepper_id}_apply_motion_profile
+          speed: !lambda 'return id(${stepper_id}_face_speed).state;'
+          acceleration: !lambda 'return id(${stepper_id}_face_acceleration).state;'
+          deceleration: !lambda 'return id(${stepper_id}_face_deceleration).state;'
       - script.execute:
           id: ${stepper_id}_move_to
           target: !lambda 'return (int) id(${stepper_id}_tg_positions)[id(${stepper_id}_face_current)]->state;'
@@ -963,8 +944,10 @@ script:
                 state: "resuming_idle"
                 reason: !lambda 'return id(${stepper_id}_face_return_reason);'
             - script.execute:
-                id: ${stepper_id}_face_apply_profile
-                idle: true
+                id: ${stepper_id}_apply_motion_profile
+                speed: !lambda 'return id(${stepper_id}_idle_speed).state;'
+                acceleration: !lambda 'return id(${stepper_id}_idle_acceleration).state;'
+                deceleration: !lambda 'return id(${stepper_id}_idle_deceleration).state;'
             - lambda: |-
                 int target;
                 int mode = id(${stepper_id}_idle_mode).active_index().value_or(0);
