@@ -814,6 +814,7 @@ script:
           id(${stepper_id}_cooldown_active) = false;
           if (!busy) id(${stepper_id}_face_origin) = id(${stepper_id}).current_position;
           id(${stepper_id}_face_busy) = true;
+          id(${stepper_id}_idle_movement_priority) |= 1;
           id(${stepper_id}_face_current) = idx;
           id(${stepper_id}_face_released) = false;
           id(${stepper_id}_face_force_return) = false;
@@ -849,6 +850,7 @@ script:
             id(${stepper_id}_face_force_return) = true;
           } else if (id(${stepper_id}_face_state) == "facing_target" && id(${stepper_id}_teach_index) < 0 && id(${stepper_id}_homing_phase) == 0) {
             id(${stepper_id}_face_busy) = true;
+            id(${stepper_id}_idle_movement_priority) |= 1;
             id(${stepper_id}_face_force_return) = true;
             id(${stepper_id}_tg_go) = true;
           } else {
@@ -1017,6 +1019,9 @@ script:
       - script.execute: ${stepper_id}_apply_settings
       - lambda: |-
           id(${stepper_id}_face_busy) = false;
+          id(${stepper_id}_idle_movement_priority) &= ~1;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
           float lo = id(${stepper_id}_cooldown_min).state;
           float hi = id(${stepper_id}_cooldown_max).state;
           float secs = hi > lo ? lo + random_float() * (hi - lo) : lo;
@@ -1043,6 +1048,9 @@ script:
           id(${stepper_id}_face_busy) = false;
           id(${stepper_id}_face_force_return) = false;
           id(${stepper_id}_face_return_reason) = "";
+          id(${stepper_id}_idle_movement_priority) &= ~1;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
       - script.execute:
           id: ${stepper_id}_face_set_state
           state: !lambda 'return state;'
@@ -1090,15 +1098,18 @@ script:
           }
           id(${stepper_id}_teach_index) = 0;
           id(${stepper_id}_teach_recorded) = 0;
+          id(${stepper_id}_idle_movement_priority) |= 4;
           id(${stepper_id}_tg_go) = true;
           ESP_LOGI("${stepper_id}", "Teach workflow started");
       - if:
           condition:
             lambda: 'return id(${stepper_id}_tg_go);'
           then:
+            - script.execute: ${stepper_id}_move_start_callbacks
             # a running facing action would walk away while teaching
             - script.stop: ${stepper_id}_face_run
             - script.stop: ${stepper_id}_face_resume_idle
+            - script.execute: ${stepper_id}_apply_settings
             - if:
                 condition:
                   lambda: 'return id(${stepper_id}_face_busy);'
@@ -1119,6 +1130,9 @@ script:
           if (i < 0) return;
           if (i >= (int) ids.size()) {
             id(${stepper_id}_teach_index) = -1;
+            id(${stepper_id}_idle_movement_priority) &= ~4;
+            id(${stepper_id}_idle_movement_paused) =
+              id(${stepper_id}_idle_movement_priority) != 0;
             char done[96];
             snprintf(done, sizeof(done), "Done: %d of %d source(s) recorded", id(${stepper_id}_teach_recorded), (int) ids.size());
             id(${stepper_id}_teach_prompt).publish_state(done);
@@ -1199,5 +1213,8 @@ script:
       - lambda: |-
           if (id(${stepper_id}_teach_index) < 0) return;
           id(${stepper_id}_teach_index) = -1;
+          id(${stepper_id}_idle_movement_priority) &= ~4;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
           id(${stepper_id}_teach_prompt).publish_state("Cancelled");
           ESP_LOGW("${stepper_id}", "Teach workflow cancelled, positions recorded so far are kept");

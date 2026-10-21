@@ -1,0 +1,440 @@
+# Optional idle movement for a stepper. The motor makes small movements after
+# configured intervals, yielding to user commands and other stepper workflows.
+#
+# Include once for each stepper, alongside stepper_control.yaml.
+#
+# Variables:
+#   stepper_idle_movement_enabled       "ON"|"OFF"
+#   stepper_idle_movement_interval_mode "Fixed"|"Random"
+#   stepper_idle_movement_interval_min / _max  seconds
+#   stepper_idle_movement_position_mode "Fixed Delta"|"Random Delta"
+#   stepper_idle_movement_delta         fixed signed offset in steps
+#   stepper_idle_movement_delta_min / _max     random signed offset range
+#   stepper_idle_movement_speed / _acceleration / _deceleration  0 = general setting
+#   stepper_idle_movement_event         Home Assistant event name
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  stepper_position_min: "-3000"
+  stepper_position_max: "3000"
+  stepper_idle_movement_enabled: "ON"
+  stepper_idle_movement_interval_mode: "Fixed"
+  stepper_idle_movement_interval_min: "30"
+  stepper_idle_movement_interval_max: "60"
+  stepper_idle_movement_position_mode: "Fixed Delta"
+  stepper_idle_movement_delta: "100"
+  stepper_idle_movement_delta_min: "-100"
+  stepper_idle_movement_delta_max: "100"
+  stepper_idle_movement_speed: "0"
+  stepper_idle_movement_acceleration: "0"
+  stepper_idle_movement_deceleration: "0"
+  stepper_idle_movement_event: "esphome.${stepper_id}_idle_movement"
+
+globals:
+  - id: ${stepper_id}_idle_movement_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_idle_movement_next_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_idle_movement_expected
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_idle_movement_origin
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_idle_movement_target
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_idle_movement_run_allowed
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_idle_movement_state
+    type: std::string
+    restore_value: no
+    initial_value: '"disabled"'
+
+api:
+  homeassistant_services: true
+
+interval:
+  - interval: 1s
+    then:
+      - script.execute: ${stepper_id}_idle_movement_tick
+
+switch:
+  - platform: template
+    id: ${stepper_id}_idle_movement_enabled
+    name: "${stepper_name} Idle Movement"
+    icon: mdi:rotate-3d-variant
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_${stepper_idle_movement_enabled}
+    entity_category: config
+    on_turn_off:
+      - script.execute: ${stepper_id}_idle_movement_cancel
+      - lambda: |-
+          id(${stepper_id}_idle_movement_next_ms) = 0;
+          id(${stepper_id}_idle_movement_state) = "disabled";
+          id(${stepper_id}_idle_movement_state_sensor).publish_state("disabled");
+    on_turn_on:
+      - lambda: |-
+          id(${stepper_id}_idle_movement_next_ms) = 0;
+          id(${stepper_id}_idle_movement_paused) = false;
+
+select:
+  - platform: template
+    id: ${stepper_id}_idle_movement_interval_mode
+    name: "${stepper_name} Idle Movement Interval Mode"
+    icon: mdi:timer-cog-outline
+    options:
+      - "Fixed"
+      - "Random"
+    initial_option: "${stepper_idle_movement_interval_mode}"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_position_mode
+    name: "${stepper_name} Idle Movement Position Mode"
+    icon: mdi:map-marker-path
+    options:
+      - "Fixed Delta"
+      - "Random Delta"
+    initial_option: "${stepper_idle_movement_position_mode}"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+number:
+  - platform: template
+    id: ${stepper_id}_idle_movement_interval_min
+    name: "${stepper_name} Idle Movement Interval Min"
+    icon: mdi:timer-outline
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 1
+    max_value: 86400
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_interval_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_interval_max
+    name: "${stepper_name} Idle Movement Interval Max"
+    icon: mdi:timer-outline
+    device_class: duration
+    unit_of_measurement: s
+    min_value: 1
+    max_value: 86400
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_interval_max}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_delta
+    name: "${stepper_name} Idle Movement Delta"
+    icon: mdi:arrow-left-right
+    unit_of_measurement: steps
+    min_value: -100000
+    max_value: 100000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_delta}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_delta_min
+    name: "${stepper_name} Idle Movement Delta Min"
+    icon: mdi:arrow-left-right
+    unit_of_measurement: steps
+    min_value: -100000
+    max_value: 100000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_delta_min}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_delta_max
+    name: "${stepper_name} Idle Movement Delta Max"
+    icon: mdi:arrow-left-right
+    unit_of_measurement: steps
+    min_value: -100000
+    max_value: 100000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_delta_max}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_speed
+    name: "${stepper_name} Idle Movement Speed"
+    icon: mdi:speedometer-slow
+    unit_of_measurement: "steps/s"
+    min_value: 0
+    max_value: 5000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_speed}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_acceleration
+    name: "${stepper_name} Idle Movement Acceleration"
+    icon: mdi:rocket-launch-outline
+    unit_of_measurement: "steps/s²"
+    min_value: 0
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_acceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${stepper_id}_idle_movement_deceleration
+    name: "${stepper_name} Idle Movement Deceleration"
+    icon: mdi:car-brake-alert
+    unit_of_measurement: "steps/s²"
+    min_value: 0
+    max_value: 10000
+    step: 1
+    mode: box
+    initial_value: ${stepper_idle_movement_deceleration}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+text_sensor:
+  - platform: template
+    id: ${stepper_id}_idle_movement_state_sensor
+    name: "${stepper_name} Idle Movement State"
+    icon: mdi:state-machine
+    entity_category: diagnostic
+
+script:
+  - id: ${stepper_id}_idle_movement_set_state
+    parameters:
+      state: string
+    then:
+      - lambda: |-
+          if (id(${stepper_id}_idle_movement_state) != state) {
+            id(${stepper_id}_idle_movement_state) = state;
+            id(${stepper_id}_idle_movement_state_sensor).publish_state(state);
+          }
+
+  - id: ${stepper_id}_idle_movement_tick
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(${stepper_id}_idle_movement_enabled).state;'
+          then:
+            - script.execute:
+                id: ${stepper_id}_idle_movement_set_state
+                state: "disabled"
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(${stepper_id}_idle_movement_priority) ||
+                           id(${stepper_id}_idle_movement_paused) ||
+                           id(${stepper_id}_homing_phase) != 0 ||
+                           !id(${stepper_id}).has_reached_target() ||
+                           id(${stepper_id}_idle_movement_active);
+                then:
+                  - if:
+                      condition:
+                        lambda: 'return !id(${stepper_id}_idle_movement_active);'
+                      then:
+                        - lambda: 'id(${stepper_id}_idle_movement_next_ms) = 0;'
+                        - script.execute:
+                            id: ${stepper_id}_idle_movement_set_state
+                            state: "paused"
+                else:
+                  - if:
+                      condition:
+                        lambda: 'return id(${stepper_id}_idle_movement_next_ms) == 0;'
+                      then:
+                        - lambda: |-
+                            float lo = id(${stepper_id}_idle_movement_interval_min).state;
+                            float hi = id(${stepper_id}_idle_movement_interval_max).state;
+                            if (hi < lo) std::swap(lo, hi);
+                            float seconds = lo;
+                            if (id(${stepper_id}_idle_movement_interval_mode).active_index().value_or(0) == 1 && hi > lo) {
+                              seconds = lo + random_float() * (hi - lo);
+                            }
+                            id(${stepper_id}_idle_movement_next_ms) =
+                              millis() + (uint32_t) (seconds * 1000.0f);
+                        - script.execute:
+                            id: ${stepper_id}_idle_movement_set_state
+                            state: "idling"
+                      else:
+                        - if:
+                            condition:
+                              lambda: 'return (int32_t) (millis() - id(${stepper_id}_idle_movement_next_ms)) >= 0;'
+                            then:
+                              - script.execute: ${stepper_id}_idle_movement_run
+
+  - id: ${stepper_id}_idle_movement_run
+    mode: single
+    then:
+      - lambda: |-
+          bool allowed = id(${stepper_id}_idle_movement_enabled).state &&
+                         id(${stepper_id}_idle_movement_priority) == 0 &&
+                         !id(${stepper_id}_idle_movement_paused) &&
+                         id(${stepper_id}_homing_phase) == 0 &&
+                         id(${stepper_id}).has_reached_target();
+          id(${stepper_id}_idle_movement_run_allowed) = allowed;
+          if (!allowed) {
+            id(${stepper_id}_idle_movement_next_ms) = 0;
+            id(${stepper_id}_idle_movement_active) = false;
+            id(${stepper_id}_idle_movement_target) = id(${stepper_id}).current_position;
+            return;
+          }
+          int32_t offset = (int32_t) id(${stepper_id}_idle_movement_delta).state;
+          if (id(${stepper_id}_idle_movement_position_mode).active_index().value_or(0) == 1) {
+            int lo = (int) id(${stepper_id}_idle_movement_delta_min).state;
+            int hi = (int) id(${stepper_id}_idle_movement_delta_max).state;
+            if (hi < lo) std::swap(lo, hi);
+            offset = lo + (int) (random_float() * (float) (hi - lo + 1));
+            if (offset > hi) offset = hi;
+          }
+          int64_t target = (int64_t) id(${stepper_id}).current_position + offset;
+          int32_t hard_min = ${stepper_position_min};
+          int32_t hard_max = ${stepper_position_max};
+          if (hard_max < hard_min) std::swap(hard_min, hard_max);
+          if (target < hard_min) target = hard_min;
+          if (target > hard_max) target = hard_max;
+          id(${stepper_id}_idle_movement_origin) = id(${stepper_id}).current_position;
+          id(${stepper_id}_idle_movement_target) = (int) target;
+          id(${stepper_id}_idle_movement_next_ms) = 0;
+          id(${stepper_id}_idle_movement_active) = true;
+      - if:
+          condition:
+            lambda: |-
+              return id(${stepper_id}_idle_movement_run_allowed) &&
+                     id(${stepper_id}_idle_movement_target) != id(${stepper_id}).current_position;
+          then:
+            - lambda: |-
+                float speed = id(${stepper_id}_idle_movement_speed).state;
+                float acc = id(${stepper_id}_idle_movement_acceleration).state;
+                float dec = id(${stepper_id}_idle_movement_deceleration).state;
+                auto *stepper = id(${stepper_id});
+                if (!(speed > 0)) speed = id(${stepper_id}_max_speed).state;
+                if (!(acc > 0)) acc = id(${stepper_id}_acceleration).state;
+                if (!(dec > 0)) dec = id(${stepper_id}_deceleration).state;
+                if (speed > 0) stepper->set_max_speed(speed);
+                if (acc > 0) stepper->set_acceleration(acc);
+                if (dec > 0) stepper->set_deceleration(dec);
+                stepper->on_update_speed();
+                id(${stepper_id}_idle_movement_issuing) = true;
+            - script.execute:
+                id: ${stepper_id}_move_to
+                target: !lambda 'return id(${stepper_id}_idle_movement_target);'
+            - lambda: |-
+                id(${stepper_id}_idle_movement_issuing) = false;
+                id(${stepper_id}_idle_movement_expected) = id(${stepper_id}).target_position;
+            - script.execute:
+                id: ${stepper_id}_idle_movement_set_state
+                state: "idle_moving"
+            - wait_until:
+                condition:
+                  lambda: |-
+                    return !id(${stepper_id}_idle_movement_active) ||
+                           id(${stepper_id}).target_position != id(${stepper_id}_idle_movement_expected) ||
+                           id(${stepper_id}).has_reached_target();
+            - if:
+                condition:
+                  lambda: |-
+                    return id(${stepper_id}_idle_movement_active) &&
+                           id(${stepper_id}).target_position == id(${stepper_id}_idle_movement_expected) &&
+                           id(${stepper_id}_idle_movement_expected) != id(${stepper_id}_idle_movement_origin) &&
+                           id(${stepper_id}).has_reached_target();
+                then:
+                  - script.execute:
+                      id: ${stepper_id}_idle_movement_set_state
+                      state: "idling"
+                  - homeassistant.event:
+                      event: ${stepper_idle_movement_event}
+                      data:
+                        event_type: "position_reached"
+                        position: !lambda 'return to_string(id(${stepper_id}).current_position);'
+                        delta: !lambda 'return to_string(id(${stepper_id}).current_position - id(${stepper_id}_idle_movement_origin));'
+            - lambda: 'id(${stepper_id}_idle_movement_active) = false;'
+            - script.execute:
+                id: ${stepper_id}_idle_movement_set_state
+                state: "idling"
+            - script.execute: ${stepper_id}_apply_settings
+          else:
+            - lambda: 'id(${stepper_id}_idle_movement_active) = false;'
+            - if:
+                condition:
+                  lambda: 'return id(${stepper_id}_idle_movement_run_allowed);'
+                then:
+                  - script.execute:
+                      id: ${stepper_id}_idle_movement_set_state
+                      state: "idling"
+                else:
+                  - script.execute:
+                      id: ${stepper_id}_idle_movement_set_state
+                      state: "paused"
+      - lambda: 'id(${stepper_id}_idle_movement_issuing) = false;'
+
+  - id: ${stepper_id}_idle_movement_cancel
+    then:
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_idle_movement_active);'
+          then:
+            - script.stop: ${stepper_id}_idle_movement_run
+            - lambda: |-
+                if (id(${stepper_id}).target_position == id(${stepper_id}_idle_movement_expected)) {
+                  id(${stepper_id}).set_target(id(${stepper_id}).current_position);
+                }
+                id(${stepper_id}_idle_movement_active) = false;
+                id(${stepper_id}_idle_movement_issuing) = false;
+            - if:
+                condition:
+                  lambda: 'return id(${stepper_id}_idle_movement_priority) == 0;'
+                then:
+                  - script.execute: ${stepper_id}_apply_settings
+      - lambda: |-
+          id(${stepper_id}_idle_movement_next_ms) = 0;
+          id(${stepper_id}_idle_movement_paused) = true;
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_idle_movement_enabled).state;'
+          then:
+            - script.execute:
+                id: ${stepper_id}_idle_movement_set_state
+                state: "paused"
+          else:
+            - script.execute:
+                id: ${stepper_id}_idle_movement_set_state
+                state: "disabled"
+
+  - id: !extend ${stepper_id}_move_start_callbacks
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(${stepper_id}_idle_movement_issuing);'
+          then:
+            - script.execute: ${stepper_id}_idle_movement_cancel
+
+  - id: !extend ${stepper_id}_stop_callbacks
+    then:
+      - script.execute: ${stepper_id}_idle_movement_cancel

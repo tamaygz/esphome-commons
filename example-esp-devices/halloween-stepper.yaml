@@ -104,6 +104,24 @@ packages:
       stepper_idle_acceleration: "30"
       stepper_idle_deceleration: "30"
 
+  idle_movement: !include
+    file: common/features/stepper_idle_movement.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_position_min: "-3000"
+      stepper_position_max: "3000"
+      stepper_idle_movement_enabled: "ON"
+      stepper_idle_movement_interval_mode: "Random"
+      stepper_idle_movement_interval_min: "30"
+      stepper_idle_movement_interval_max: "90"
+      stepper_idle_movement_position_mode: "Random Delta"
+      stepper_idle_movement_delta_min: "-100"
+      stepper_idle_movement_delta_max: "100"
+      stepper_idle_movement_speed: "100"
+      stepper_idle_movement_acceleration: "30"
+      stepper_idle_movement_deceleration: "30"
+
   target_motion: !include
     file: common/features/stepper_target_source.yaml
     vars:

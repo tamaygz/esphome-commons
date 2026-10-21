@@ -192,12 +192,14 @@ script:
             - script.execute: ${stepper_id}_home_manual
           else:
             - lambda: |-
+                id(${stepper_id}_idle_movement_priority) |= 2;
                 id(${stepper_id}_homed) = false;
                 id(${stepper_id}_homing_phase) = 1;
                 id(${stepper_id}_homing_result).publish_state("Searching");
                 float dist = id(${stepper_id}_homing_max_distance).state;
                 int32_t dir = id(${stepper_id}_homing_positive).state ? 1 : -1;
                 ESP_LOGI("${stepper_id}", "Homing started towards %s, max %d steps", dir > 0 ? "positive" : "negative", (int) dist);
+            - script.execute: ${stepper_id}_move_start_callbacks
             - lambda: |-
                 int32_t pos = id(${stepper_id}).current_position;
                 int64_t delta = (int64_t) pos - id(${stepper_id}_travel_position);
@@ -236,6 +238,10 @@ script:
                 then:
                   - lambda: 'id(${stepper_id}_homing_result).publish_state("Aborted");'
                   - script.execute: ${stepper_id}_apply_settings
+      - lambda: |-
+          id(${stepper_id}_idle_movement_priority) &= ~2;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
 
   # called when the home signal is seen while searching
   - id: ${stepper_id}_home_reached
@@ -277,7 +283,9 @@ script:
   # --- manual homing: declare the current position to be home ---------------
   - id: ${stepper_id}_home_manual
     then:
-      - lambda: 'id(${stepper_id}_homing_phase) = 0;'
+      - lambda: |-
+          id(${stepper_id}_idle_movement_priority) |= 2;
+          id(${stepper_id}_homing_phase) = 0;
       - script.execute:
           id: ${stepper_id}_set_position
           position: !lambda 'return (int) id(${stepper_id}_home_position).state;'
@@ -291,3 +299,18 @@ script:
           ESP_LOGI("${stepper_id}", "Homed, position is now %d", id(${stepper_id}).current_position);
       # restore the regular speed (it was lowered while searching)
       - script.execute: ${stepper_id}_apply_settings
+      - lambda: |-
+          id(${stepper_id}_idle_movement_priority) &= ~2;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
+
+  - id: !extend ${stepper_id}_stop_callbacks
+    then:
+      - if:
+          condition:
+            lambda: 'return id(${stepper_id}_homing_phase) != 0;'
+          then:
+            - lambda: |-
+                id(${stepper_id}_idle_movement_priority) &= ~2;
+                id(${stepper_id}_idle_movement_paused) =
+                  id(${stepper_id}_idle_movement_priority) != 0;

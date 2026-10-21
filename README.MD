@@ -135,6 +135,14 @@ For more examples check /examples
 - **Other entities:** `Taught Sources`, `Registered Sources`, `Last Faced Source`, `Last Taught`, `Facing Cooldown`/`Remaining`, per-source `Last Triggered`.
 - **Variables:** `stepper_facing_enabled`, `stepper_facing_interruptible`, `stepper_facing_cooldown_min/_max`, `stepper_return_idle`, `stepper_return_mode`, `stepper_return_hold_min/_max`, `stepper_return_timeout`, `stepper_idle_mode`, `stepper_idle_position`, `stepper_idle_offset`, `stepper_idle_offset_min/_max`, `stepper_face_*` / `stepper_idle_*` (speed, acceleration, deceleration), `stepper_facing_event`; per source `target_id`, `target_name`, `target_order`, `target_default_position`. See `example-esp-devices/halloween-stepper.yaml`.
 
+### Stepper Idle Movement
+
+- **File:** `common/features/stepper_idle_movement.yaml` (optional, once per stepper).
+- **Description:** When enabled (default ON and restored), periodically moves the stepper by a fixed or random signed offset. Configure a fixed interval or random interval range, fixed or random offset range, and a separate speed/acceleration/deceleration profile (0 uses the general stepper setting). Idle movement pauses while the stepper is moving, homing, facing a source, teaching, or handling another move/stop/position command, and resumes after higher-priority work completes.
+- **Entities:** `Idle Movement` switch; interval and position mode selectors; min/max interval and delta numbers; movement speed profile numbers; `Idle Movement State` diagnostic text sensor (`disabled`, `paused`, `idling`, `idle_moving`).
+- **Event:** `esphome.<stepper_id>_idle_movement`, with `event_type: position_reached`, `position`, and signed `delta`.
+- **Variables:** `stepper_idle_movement_enabled`, `stepper_idle_movement_interval_mode`, `stepper_idle_movement_interval_min/_max`, `stepper_idle_movement_position_mode`, `stepper_idle_movement_delta`, `stepper_idle_movement_delta_min/_max`, `stepper_idle_movement_speed/_acceleration/_deceleration`, and `stepper_idle_movement_event`. See `example-esp-devices/halloween-stepper.yaml`.
+
 ### Buttons
 
 - **File:** `common/button/restart.yaml`

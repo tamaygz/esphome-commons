@@ -55,6 +55,19 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  # bit flags: facing=1, homing=2, teaching=4
+  - id: ${stepper_id}_idle_movement_priority
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ${stepper_id}_idle_movement_paused
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${stepper_id}_idle_movement_issuing
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 esphome:
   on_boot:
@@ -380,6 +393,8 @@ binary_sensor:
             }
             ESP_LOGD("${stepper_id}", "Move finished at position %d (%u steps)",
                      pos, (unsigned) travelled);
+            id(${stepper_id}_idle_movement_paused) =
+              id(${stepper_id}_idle_movement_priority) != 0;
   - platform: template
     id: ${stepper_id}_homed_sensor
     name: "${stepper_name} Homed"
@@ -469,7 +484,12 @@ script:
             if (t != target) ESP_LOGW("${stepper_id}", "Target %d clamped to soft limit %d", (int) target, (int) t);
           }
           ESP_LOGD("${stepper_id}", "Moving from %d to %d", id(${stepper_id}).current_position, t);
+          id(${stepper_id}_move_start_callbacks).execute();
           id(${stepper_id}).set_target(t);
+          if (id(${stepper_id}).has_reached_target()) {
+            id(${stepper_id}_idle_movement_paused) =
+              id(${stepper_id}_idle_movement_priority) != 0;
+          }
 
   - id: ${stepper_id}_move_relative
     parameters:
@@ -492,6 +512,8 @@ script:
           }
           id(${stepper_id}_homing_phase) = 0;
           id(${stepper_id}).set_target(id(${stepper_id}).current_position);
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
           ESP_LOGI("${stepper_id}", "Stopped at position %d", id(${stepper_id}).current_position);
 
   - id: ${stepper_id}_set_position
@@ -499,6 +521,7 @@ script:
       position: int
     then:
       - lambda: |-
+          id(${stepper_id}_move_start_callbacks).execute();
           int32_t current = id(${stepper_id}).current_position;
           int64_t delta = (int64_t) current - id(${stepper_id}_travel_position);
           if (delta != 0) {
@@ -509,7 +532,13 @@ script:
           id(${stepper_id}).set_target(position);
           id(${stepper_id}_saved_position) = position;
           id(${stepper_id}_travel_position) = position;
+          id(${stepper_id}_idle_movement_paused) =
+            id(${stepper_id}_idle_movement_priority) != 0;
           ESP_LOGI("${stepper_id}", "Current position set to %d", (int) position);
+
+  - id: ${stepper_id}_move_start_callbacks
+    then:
+      - lambda: 'return;'
 
   - id: ${stepper_id}_stop_callbacks
     then:
