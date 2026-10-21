@@ -28,7 +28,7 @@ text_sensor:
   - platform: wifi_info
     ip_address:
       id: wifi_ip_address
-      name: WIIF IP Address
+      name: WIFI IP Address
       icon: "mdi:wan"
       entity_category: "diagnostic"
     ssid:

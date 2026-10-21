@@ -1,20 +1,26 @@
+# Interval Interpreter Feature
+# Interprets sequences of short ('S') and long ('L') presses on a sensor/button and executes
+# a callback script when a secret pattern (e.g. "SSLLS") is matched.
+#
+# Usage:
+# Call scripts `${id}_handle_press` and `${id}_handle_release` from your binary sensor's
+# `on_press` / `on_release` triggers or pass them as callback script substitutions.
 substitutions:
   id: "interpreter"
   friendly_name: "Interval Interpreter"
-  reset_time: "3000000" # microseconds (1s = 1000000 microseconds)
+  reset_time: "3000000" # microseconds (1s = 1,000,000 microseconds)
   short_signal_time: "200000" # microseconds
   long_signal_time: "750000" # microseconds
-  monitored_sensor_id: monitored_sensor
   script_execute_on_match: ${id}_dummy_execute_script # script to execute when the secret code matches
-  secret_code_to_match: "" # secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS" for short-short-long-long-short
+  secret_code_to_match: "" # secret_code_to_match @ use S for short press and L for long press, e.g. "SSLLS"
 
 globals:
   - id: ${id}_start_time
-    type: int
+    type: uint32_t
     restore_value: no
     initial_value: "0"
   - id: ${id}_last_input_time
-    type: int
+    type: uint32_t
     restore_value: no
     initial_value: "0"
   - id: ${id}_secret_code
@@ -24,16 +30,7 @@ globals:
   - id: ${id}_secret_code_to_match
     type: std::string
     restore_value: no
-    initial_value: '"${${id}_secret_code_to_match}"'
-
-binary_sensor:
-  - id: !extend ${monitored_sensor_id}
-    on_press:
-      then:
-        - script.execute: ${id}_handle_press
-    on_release:
-      then:
-        - script.execute: ${id}_handle_release
+    initial_value: '"${secret_code_to_match}"'
 
 script:
   - id: ${id}_dummy_execute_script
@@ -42,6 +39,7 @@ script:
           format: "SECRET CODE MATCHED!! No script was executed but the dummy instead."
           tag: ${id}
           level: WARN
+
   - id: ${id}_update_secretcode
     parameters:
       new_code: string
@@ -58,10 +56,11 @@ script:
           }
           for (char &c : new_code) {
             if (c != 'L' && c != 'S') {
-              ESP_LOGE("${id}", "[update_secretcode] Invalid character '%c' in the new secret code. Only 'L' and 'S' are allowed. Code was saved, but interpreter won't be able to match this, ever.", c);
+              ESP_LOGE("${id}", "[update_secretcode] Invalid character '%c' in the new secret code. Only 'L' and 'S' are allowed.", c);
             }
           }
           ESP_LOGW("${id}", "Updated secret_code_to_match to: %s", new_code.c_str());
+
   - id: ${id}_handle_press
     then:
       - lambda: |-
@@ -69,12 +68,13 @@ script:
             ESP_LOGD("${id}", "[handle_press] The secret_code_to_match is empty. Please set a valid secret code to match.");
             return;
           }
-          int local_start_time = system_get_time();
+          uint32_t local_start_time = micros();
           if (local_start_time - id(${id}_last_input_time) > ${reset_time}) {
-            ESP_LOGD("${id}", "resetting secret code because reset_time has passed");
-            id(${id}_secret_code).clear();  // Reset the code after ${reset_time} seconds of no input
+            ESP_LOGD("${id}", "Resetting secret code because reset_time has passed");
+            id(${id}_secret_code).clear();  // Reset the code after reset_time of no input
           }
           id(${id}_start_time) = local_start_time;
+
   - id: ${id}_handle_release
     then:
       - lambda: |-
@@ -82,20 +82,20 @@ script:
             ESP_LOGD("${id}", "[handle_release] The secret_code_to_match is empty. Please set a valid secret code to match.");
             return;
           }
-          int release_time = system_get_time();
-          int press_duration = release_time - id(${id}_start_time);
+          uint32_t release_time = micros();
+          uint32_t press_duration = release_time - id(${id}_start_time);
           if (press_duration < ${short_signal_time}) {
             id(${id}_secret_code).append("S");  // Short press
           } else if (press_duration < ${long_signal_time}) {
             id(${id}_secret_code).append("L");  // Long press
           } else {
-            id(${id}_secret_code).clear();  // Reset the code if the press was longer than ${long_signal_time} ms
+            id(${id}_secret_code).clear();  // Reset the code if the press was longer than long_signal_time
           }
           id(${id}_last_input_time) = release_time;
-          ESP_LOGD("${id}", "[handle_release] Press began at: %d, stopped at: %d, duration: %d ms", id(${id}_start_time), release_time, press_duration);
+          ESP_LOGD("${id}", "[handle_release] Press began at: %u, stopped at: %u, duration: %u us", id(${id}_start_time), release_time, press_duration);
           ESP_LOGI("${id}", "[handle_release] Current inputted secret code: %s", id(${id}_secret_code).c_str());
           if (id(${id}_secret_code) == id(${id}_secret_code_to_match)) {
-            ESP_LOGI("${id}", "SECRET CODE [${secret_code_to_match}] MATCHED!! Executing script ${script_execute_on_match}.");
+            ESP_LOGI("${id}", "SECRET CODE [%s] MATCHED!! Executing script ${script_execute_on_match}.", id(${id}_secret_code_to_match).c_str());
             id(${id}_secret_code).clear();  // Reset the code after a successful match
             id(${script_execute_on_match}).execute();
           }

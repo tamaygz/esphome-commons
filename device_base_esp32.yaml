@@ -1,0 +1,5 @@
+substitutions:
+  platform: esp32
+
+packages:
+  base:   !include device_base.yaml

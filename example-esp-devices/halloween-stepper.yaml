@@ -1,0 +1,139 @@
+# ESP32 dev module driving a 28BYJ-48 stepper (ULN2003) with a PIR motion sensor and a home endstop.
+#
+# Substitutions:
+# - id / friendly_name: device name used for the hostname and in Home Assistant.
+# - board: esp32dev (Espressif ESP32 Dev Module).
+#
+# Packages:
+# - base: common ESP32 base (wifi, api, logger, status, restart, version, time).
+# - web_server: optional (secured) web server.
+# - stepper: ULN2003 stepper with position/angle/status sensors, speed/acceleration/limits/presets
+#   configurable in HA, move/stop/preset buttons, position persistence and odometer.
+#   (use ../stepper/a4988.yaml instead for STEP/DIR drivers)
+# - homing: manual ('Set Home Here') and automatic ('Home' button / 'Home On Boot') homing.
+#   The home signal is whatever calls the scripts stepper_motor_home_signal_on / stepper_motor_home_signal_off.
+# - endstop: GPIO limit switch wired to the home signal. Remove it (and wire your own signal to the
+#   scripts above) if you have no endstop; manual homing keeps working.
+# - motion: PIR on GPIO4 with last detected / duration / detection counter and HA configurable delays.
+# - facing + target_motion / target_external: the stepper faces the source that signals. The PIR is source
+#   'motion_detected' (via motion_start_callback_script), 'external' is triggered from HA with the action
+#   esphome.halloween1_stepper_motor_face_source (source: external). Record the positions with the
+#   'Teach Start' / 'Teach Confirm' buttons; facing refuses to move to sources that were never taught.
+
+substitutions:
+  id: halloween1
+  friendly_name: Halloween1
+  board: esp32dev
+  version: dev
+  log_level: debug
+
+packages:
+  base: !include ../device_base_esp32.yaml
+  web_server: !include ../web_server.yaml
+
+  stepper: !include
+    file: ../stepper/uln2003.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_pin_a: GPIO19
+      stepper_pin_b: GPIO21
+      stepper_pin_c: GPIO22
+      stepper_pin_d: GPIO23
+      stepper_max_speed: "246"
+      stepper_acceleration: "50"
+      stepper_deceleration: "75"
+      stepper_position_min: "-3000"
+      stepper_position_max: "3000"
+      stepper_preset_1: "0"
+      stepper_preset_2: "2000"
+
+  homing: !include
+    file: ../features/stepper_homing.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_position_min: "-3000"
+      stepper_position_max: "3000"
+      stepper_homing_speed: "100"
+      stepper_homing_max_distance: "6000"
+      stepper_homing_backoff: "50"
+
+  endstop: !include
+    file: ../binary_sensor/endstop.yaml
+    vars:
+      sensor_id: stepper_endstop
+      sensor_name: "Stepper Endstop"
+      endstop_pin: GPIO18
+      endstop_press_callback_script: stepper_motor_home_signal_on
+      endstop_release_callback_script: stepper_motor_home_signal_off
+
+  motion: !include
+    file: ../binary_sensor/motion_sensor.yaml
+    vars:
+      sensor_id: motion_detected
+      sensor_name: "Motion Detected"
+      sensor_pin: GPIO4
+      mtime_on: "250"
+      mtime_off: "3000"
+      motion_start_callback_script: stepper_motor_face_motion_detected
+      motion_end_callback_script: stepper_motor_release_motion_detected
+
+  facing: !include
+    file: ../features/stepper_facing.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_facing_enabled: "ON"
+      # finish moving to the target, then wait 5-15 s before accepting the next signal
+      stepper_facing_interruptible: "OFF"
+      stepper_facing_cooldown_min: "5"
+      stepper_facing_cooldown_max: "15"
+      # return to the idle position when motion clears (at the latest after 60 s)
+      stepper_return_idle: "ON"
+      stepper_return_mode: "Motion Clear"
+      stepper_return_timeout: "60"
+      # back to where it came from (Relative, offset 0); alternatives: "Absolute" or "Random Relative" (offset min/max)
+      stepper_idle_mode: "Relative"
+      stepper_idle_offset: "0"
+      stepper_idle_offset_min: "-100"
+      stepper_idle_offset_max: "100"
+      # fast towards the target, slow and smooth back to idle
+      stepper_face_speed: "246"
+      stepper_idle_speed: "120"
+      stepper_idle_acceleration: "30"
+      stepper_idle_deceleration: "30"
+
+  idle_movement: !include
+    file: ../features/stepper_idle_movement.yaml
+    vars:
+      stepper_id: stepper_motor
+      stepper_name: "Stepper"
+      stepper_position_min: "-3000"
+      stepper_position_max: "3000"
+      stepper_idle_movement_enabled: "ON"
+      stepper_idle_movement_interval_mode: "Random"
+      stepper_idle_movement_interval_min: "30"
+      stepper_idle_movement_interval_max: "90"
+      stepper_idle_movement_position_mode: "Random Delta"
+      stepper_idle_movement_delta_min: "-100"
+      stepper_idle_movement_delta_max: "100"
+      stepper_idle_movement_speed: "100"
+      stepper_idle_movement_acceleration: "30"
+      stepper_idle_movement_deceleration: "30"
+
+  target_motion: !include
+    file: ../features/stepper_target_source.yaml
+    vars:
+      stepper_id: stepper_motor
+      target_id: motion_detected
+      target_name: "Motion"
+      target_order: "1"
+
+  target_external: !include
+    file: ../features/stepper_target_source.yaml
+    vars:
+      stepper_id: stepper_motor
+      target_id: external
+      target_name: "External"
+      target_order: "2"

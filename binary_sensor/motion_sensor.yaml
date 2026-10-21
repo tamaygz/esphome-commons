@@ -1,29 +1,188 @@
+# PIR / radar style motion sensor on a GPIO with runtime-configurable debouncing
+# and diagnostics.
+#
+# Exposed entities (all prefixed with ${sensor_name}):
+#   binary_sensor  motion state (device_class motion)
+#   switch         'Enabled'          ignore the sensor (and its callback scripts) while off
+#   number         'Trigger Delay'    ms the signal must be present before motion is reported
+#   number         'Clear Delay'      ms without signal before motion is cleared
+#   text_sensor    'Last Detected'    timestamp of the last detection (device_class timestamp)
+#   sensor         'Last Duration'    duration of the last detection in seconds
+#   sensor         'Detections'       number of detections since boot
+#
+# Variables:
+#   mtime_on / mtime_off   initial trigger / clear delay in milliseconds (changeable from HA afterwards)
+#   motion_start_callback_script / motion_end_callback_script   scripts executed on motion start / end
 substitutions:
   sensor_id: "motion_sensor"
   sensor_name: "Motion Sensor"
   sensor_pin: GPIO02
-  motion_start_callback_script: signal_start_dummy
-  motion_end_callback_script: signal_stop_dummy
-  mtime_on: "250ms"
-  mtime_off: "3s"
+  motion_start_callback_script: ${sensor_id}_signal_start_dummy
+  motion_end_callback_script: ${sensor_id}_signal_stop_dummy
+  mtime_on: "250"   # ms
+  mtime_off: "3000" # ms
 
-packages:
-  motion_sensor: !include 
-    file: gpio_sensor.yaml
-    vars:
-      sensor_id: ${sensor_id}
-      sensor_name: ${sensor_name}
-      sensor_pin: ${sensor_pin}
-      sensor_device_class: motion
-      signal_start_callback_script: ${motion_start_callback_script}
-      signal_end_callback_script: ${motion_end_callback_script}
+globals:
+  - id: ${sensor_id}_press_time
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${sensor_id}_detections
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: ${sensor_id}_candidate
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: ${sensor_id}_candidate_since
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ${sensor_id}_logical_state
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
 binary_sensor:
-  - id: !extend ${sensor_id}
+  - platform: gpio
+    id: ${sensor_id}_raw
+    internal: true
     pin:
+      number: ${sensor_pin}
+      mode: INPUT_PULLUP
       inverted: false
-    filters:
-      - delayed_on_off: 
-          time_on: ${mtime_on}
-          time_off: ${mtime_off}
+  - platform: template
+    id: ${sensor_id}
+    name: "${sensor_name}"
+    device_class: motion
+    lambda: |-
+      uint32_t now = millis();
+      if (!id(${sensor_id}_enabled).state) {
+        id(${sensor_id}_candidate) = false;
+        id(${sensor_id}_candidate_since) = now;
+        id(${sensor_id}_logical_state) = false;
+        return false;
+      }
+      bool input = id(${sensor_id}_raw).state;
+      if (input != id(${sensor_id}_candidate)) {
+        id(${sensor_id}_candidate) = input;
+        id(${sensor_id}_candidate_since) = now;
+      }
+      if (id(${sensor_id}_candidate) != id(${sensor_id}_logical_state)) {
+        uint32_t delay;
+        if (id(${sensor_id}_candidate)) {
+          delay = id(${sensor_id}_trigger_delay).has_state()
+            ? (uint32_t) id(${sensor_id}_trigger_delay).state : ${mtime_on};
+        } else {
+          delay = id(${sensor_id}_clear_delay).has_state()
+            ? (uint32_t) id(${sensor_id}_clear_delay).state : ${mtime_off};
+        }
+        delay += 25U;
+        if (now - id(${sensor_id}_candidate_since) >= delay) {
+          id(${sensor_id}_logical_state) = id(${sensor_id}_candidate);
+        }
+      }
+      return id(${sensor_id}_logical_state);
+    on_press:
+      - lambda: |-
+          id(${sensor_id}_press_time) = millis() | 1U;  // never 0
+          id(${sensor_id}_detections)++;
+          id(${sensor_id}_detections_sensor).publish_state(id(${sensor_id}_detections));
+          auto now = id(ha_time).now();
+          if (now.is_valid()) {
+            id(${sensor_id}_last_detected).publish_state(now.strftime("%Y-%m-%dT%H:%M:%S%z"));
+          }
+      - script.execute: ${motion_start_callback_script}
+    on_release:
+      - lambda: |-
+          // 0 = no detection started since boot (initial state publish), nothing to report
+          if (id(${sensor_id}_press_time) != 0) {
+            id(${sensor_id}_last_duration).publish_state((millis() - id(${sensor_id}_press_time)) / 1000.0f);
+            id(${sensor_id}_press_time) = 0;
+          }
+      - script.execute: ${motion_end_callback_script}
 
+switch:
+  - platform: template
+    id: ${sensor_id}_enabled
+    name: "${sensor_name} Enabled"
+    icon: mdi:motion-sensor
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    on_turn_off:
+      # clear a motion state that is still active
+      - lambda: |-
+          id(${sensor_id}_candidate) = false;
+          id(${sensor_id}_candidate_since) = millis();
+          id(${sensor_id}_logical_state) = false;
+          id(${sensor_id}).publish_state(false);
+
+number:
+  - platform: template
+    id: ${sensor_id}_trigger_delay
+    name: "${sensor_name} Trigger Delay"
+    icon: mdi:timer-play-outline
+    device_class: duration
+    unit_of_measurement: ms
+    min_value: 0
+    max_value: 60000
+    step: 50
+    mode: box
+    initial_value: ${mtime_on}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    id: ${sensor_id}_clear_delay
+    name: "${sensor_name} Clear Delay"
+    icon: mdi:timer-stop-outline
+    device_class: duration
+    unit_of_measurement: ms
+    min_value: 0
+    max_value: 3600000
+    step: 100
+    mode: box
+    initial_value: ${mtime_off}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+text_sensor:
+  - platform: template
+    id: ${sensor_id}_last_detected
+    name: "${sensor_name} Last Detected"
+    icon: mdi:clock-alert-outline
+    device_class: timestamp
+    entity_category: diagnostic
+
+sensor:
+  - platform: template
+    id: ${sensor_id}_last_duration
+    name: "${sensor_name} Last Duration"
+    icon: mdi:timer-outline
+    device_class: duration
+    unit_of_measurement: s
+    accuracy_decimals: 1
+    state_class: measurement
+    entity_category: diagnostic
+  - platform: template
+    id: ${sensor_id}_detections_sensor
+    name: "${sensor_name} Detections"
+    icon: mdi:counter
+    accuracy_decimals: 0
+    state_class: total_increasing
+    entity_category: diagnostic
+
+script:
+  - id: ${sensor_id}_signal_start_dummy
+    then:
+      - logger.log:
+          format: "[START] No script was executed but the dummy instead."
+          tag: ${sensor_id}
+  - id: ${sensor_id}_signal_stop_dummy
+    then:
+      - logger.log:
+          format: "[STOP] No script was executed but the dummy instead."
+          tag: ${sensor_id}

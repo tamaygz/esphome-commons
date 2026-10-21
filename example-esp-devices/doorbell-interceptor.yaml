@@ -29,11 +29,11 @@ substitutions:
     log_level: debug
 
 packages:
-    base: !include common/device_base_esp8266.yaml
-    web_server: !include common/web_server.yaml
+    base: !include ../device_base_esp8266.yaml
+    web_server: !include ../web_server.yaml
 
     buzzer_relay: !include 
-        file: common/switch/relay01s.yaml
+        file: ../switch/relay01s.yaml
         vars:
             relay_id: "${name}_buzzer_relay"
             relay_name: "${friendly_name} Buzzer Relay"
@@ -42,12 +42,10 @@ packages:
             relay_timer_interval: "2500"
 
     bell_sensor: !include
-        file: common/binary_sensor/gpio_sensor.yaml
+        file: ../binary_sensor/gpio_sensor.yaml
         vars:
             sensor_id: "${name}_bellsensor"
             sensor_name: "${friendly_name} Bell Sensor"
             sensor_pin: GPIO02
-
-
 
 ### todo: one sunny day add intercom features

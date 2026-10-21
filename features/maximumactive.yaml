@@ -1,17 +1,24 @@
-# feature that limits maximum off time of a device
-# for now only supports monitoring of switches (could also pass a lambda to evaluate in the future if needed)
-# please pass 'monitored_switch' as variable
+# Feature that limits maximum active (ON) time of a device.
+# Monitor a switch or output by triggering on state changes.
+#
+# Variables:
+#   monitored_switch: ID of the switch to turn off when max active time is reached.
+#   id: prefix for generated component IDs (default: maxactive)
+substitutions:
+  id: "maxactive"
+  monitored_switch: "relayswitch"
+
 globals:
-  - id: maxactive_last_activation
+  - id: ${id}_last_activation
     type: time_t
     restore_value: no
     initial_value: '0'
 
-# inputs
+# Inputs
 number:
   - platform: template
     name: "Maximum ON time"
-    id: "max_time_active"
+    id: ${id}_max_time_active
     unit_of_measurement: min
     device_class: duration
     initial_value: 30
@@ -24,54 +31,53 @@ number:
     restore_value: true
 
 switch:
-  - id: !extend ${monitored_switch}
-    on_turn_on:
-      - script.stop: maxactive_watchdog
-      - globals.set:
-          id: maxactive_last_activation
-          value: !lambda "return id(ha_time).now().timestamp;"
-      - script.execute: maxactive_watchdog
-      - if:
-          condition:
-            switch.is_on: limit_active_time
-          then:
-            - lambda: |-
-                int delay = (int)id(max_time_active).state;
-                time_t target = (id(maxactive_last_activation) + (delay * 60));
-                ESP_LOGI("LIMITACTIVE", "active limitation mode engaged at %d", id(ha_time).now());
-                ESP_LOGI("LIMITACTIVE", "After delay of %dminutes switch will be deactivated at %d ..", delay, (int) target );
-    on_turn_off:
-      - script.stop: maxactive_watchdog
-      - logger.log: 
-          tag: LIMITACTIVE
-          level: info
-          format: ${monitored_switch} turned off, stopping time limitation watchdog.
   - platform: template
     name: Limit Active Time
-    id: limit_active_time
+    id: ${id}_limit_active_time
     icon: mdi:timer-alert-outline
     optimistic: true
     entity_category: config
     restore_mode: RESTORE_DEFAULT_OFF
-  # on_turn_off:
-  #   logger.log: watching disabled
-  # on_turn_on:
-  #   logger.log: watching enabled
 
 script:
-  - id: maxactive_watchdog
+  - id: ${id}_on_monitored_switch_turn_on
+    then:
+      - script.stop: ${id}_watchdog
+      - globals.set:
+          id: ${id}_last_activation
+          value: !lambda "return id(ha_time).now().timestamp;"
+      - script.execute: ${id}_watchdog
+      - if:
+          condition:
+            switch.is_on: ${id}_limit_active_time
+          then:
+            - lambda: |-
+                int delay = (int) id(${id}_max_time_active).state;
+                time_t target = (id(${id}_last_activation) + (delay * 60));
+                ESP_LOGI("LIMITACTIVE", "Active limitation mode engaged at %d", id(ha_time).now().timestamp);
+                ESP_LOGI("LIMITACTIVE", "After delay of %d minutes switch will be deactivated at %d..", delay, (int) target);
+
+  - id: ${id}_on_monitored_switch_turn_off
+    then:
+      - script.stop: ${id}_watchdog
+      - logger.log:
+          tag: LIMITACTIVE
+          level: info
+          format: Monitored switch turned off, stopping time limitation watchdog.
+
+  - id: ${id}_watchdog
     then:
       - while:
           condition:
-            switch.is_on: limit_active_time
+            switch.is_on: ${id}_limit_active_time
           then:
             - if:
                 condition:
-                  - lambda: 'return ( id(ha_time).now().timestamp >= (id(maxactive_last_activation) + ((int)id(max_time_active).state * 60)) );'
+                  - lambda: 'return (id(ha_time).now().timestamp >= (id(${id}_last_activation) + ((int) id(${id}_max_time_active).state * 60)));'
                 then:
-                  - logger.log: 
+                  - logger.log:
                       tag: LIMITACTIVE
                       level: info
-                      format: max active time reached, turning off ${monitored_switch}
+                      format: Max active time reached, turning off ${monitored_switch}
                   - switch.turn_off: ${monitored_switch}
-            - delay: 5 min
+            - delay: 5min

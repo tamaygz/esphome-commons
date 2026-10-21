@@ -1,0 +1,140 @@
+# One target source for features/stepper_facing.yaml. Include this file once per source (0..n times).
+# A source is anything that tells the stepper "face me": a motion sensor on this device or an external trigger.
+#
+# Entities (prefixed with ${target_name}): 'Position' number and 'Taught' switch (both persisted, editable from
+# HA, so positions can also be entered by hand), 'Record Position' and 'Go To' buttons, 'Last Triggered' timestamp.
+#
+# Triggering:
+#   motion sensor on this device:  motion_start_callback_script: ${stepper_id}_face_${target_id}
+#                                  motion_end_callback_script:   ${stepper_id}_release_${target_id}
+#   external trigger (HA, ...):    call ${stepper_id}_face_source / ${stepper_id}_release_source
+#                                  with source: "${target_id}"
+# The release (signal cleared) is optional, it is used by 'Return Mode' = Motion Clear of the stepper_facing
+# feature. Without it the stepper returns by the 'Return Timeout' (or in 'Timer' mode).
+#
+# Variables:
+#   target_id               unique id of the source (letters, digits, underscore)
+#   target_name             name shown in HA and in the teach prompts
+#   target_order            position of the source in the teach workflow (ascending, ties keep include order)
+#   target_default_position initial position of the source (it still has to be taught)
+substitutions:
+  stepper_id: stepper_motor
+  stepper_name: "Stepper"
+  target_id: source_1
+  target_name: "Source 1"
+  target_order: "0"
+  target_default_position: "0"
+  stepper_position_min: "-3000"
+  stepper_position_max: "3000"
+
+esphome:
+  on_boot:
+    - priority: -250
+      then:
+        - lambda: |-
+            // register in the facing registry, sorted by target_order
+            auto &ids = id(${stepper_id}_tg_ids);
+            for (auto &existing : ids) {
+              if (existing == "${target_id}") {
+                ESP_LOGE("${stepper_id}", "Target source '${target_id}' is registered twice");
+                return;
+              }
+            }
+            size_t pos = ids.size();
+            auto &orders = id(${stepper_id}_tg_orders);
+            while (pos > 0 && orders[pos - 1] > ${target_order}) pos--;
+            ids.insert(ids.begin() + pos, "${target_id}");
+            id(${stepper_id}_tg_labels).insert(id(${stepper_id}_tg_labels).begin() + pos, "${target_name}");
+            orders.insert(orders.begin() + pos, ${target_order});
+            id(${stepper_id}_tg_positions).insert(id(${stepper_id}_tg_positions).begin() + pos, id(${stepper_id}_tg_${target_id}_position));
+            id(${stepper_id}_tg_taught).insert(id(${stepper_id}_tg_taught).begin() + pos, id(${stepper_id}_tg_${target_id}_taught));
+            id(${stepper_id}_tg_last_triggered).insert(id(${stepper_id}_tg_last_triggered).begin() + pos, id(${stepper_id}_tg_${target_id}_last_triggered));
+
+number:
+  - platform: template
+    id: ${stepper_id}_tg_${target_id}_position
+    name: "${target_name} Position"
+    icon: mdi:rotate-right
+    unit_of_measurement: "steps"
+    min_value: ${stepper_position_min}
+    max_value: ${stepper_position_max}
+    step: 1
+    mode: box
+    initial_value: ${target_default_position}
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+switch:
+  # on = the position was recorded/confirmed. Facing never moves to a source that is not taught.
+  - platform: template
+    id: ${stepper_id}_tg_${target_id}_taught
+    name: "${target_name} Taught"
+    icon: mdi:check-decagram-outline
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    entity_category: config
+
+button:
+  - platform: template
+    id: ${stepper_id}_tg_${target_id}_btn_record
+    name: "Record ${target_name} Position"
+    icon: mdi:record-circle-outline
+    entity_category: config
+    on_press:
+      - lambda: |-
+          if (!id(${stepper_id}).has_reached_target()) {
+            ESP_LOGW("${stepper_id}", "Not recording '${target_name}': the stepper is still moving");
+            return;
+          }
+          int32_t pos = id(${stepper_id}).current_position;
+          auto &traits = id(${stepper_id}_tg_${target_id}_position).traits;
+          if (pos < traits.get_min_value() || pos > traits.get_max_value()) {
+            ESP_LOGW("${stepper_id}", "Not recording '${target_name}': position %d is outside the allowed range %d..%d",
+                     (int) pos, (int) traits.get_min_value(), (int) traits.get_max_value());
+            return;
+          }
+          auto call = id(${stepper_id}_tg_${target_id}_position).make_call();
+          call.set_value(pos);
+          call.perform();
+          id(${stepper_id}_tg_${target_id}_taught).turn_on();
+          ESP_LOGI("${stepper_id}", "Recorded position %d for '${target_name}'", id(${stepper_id}).current_position);
+  - platform: template
+    id: ${stepper_id}_tg_${target_id}_btn_goto
+    name: "Go To ${target_name}"
+    icon: mdi:target
+    on_press:
+      - if:
+          condition:
+            switch.is_on: ${stepper_id}_tg_${target_id}_taught
+          then:
+            - script.execute:
+                id: ${stepper_id}_move_to
+                target: !lambda 'return (int) id(${stepper_id}_tg_${target_id}_position).state;'
+          else:
+            - logger.log:
+                format: "'${target_name}' was never taught, not moving"
+                tag: ${stepper_id}
+                level: WARN
+
+text_sensor:
+  - platform: template
+    id: ${stepper_id}_tg_${target_id}_last_triggered
+    name: "${target_name} Last Triggered"
+    icon: mdi:clock-alert-outline
+    device_class: timestamp
+    entity_category: diagnostic
+
+script:
+  # trigger input of this source (wire motion_start_callback_script to it)
+  - id: ${stepper_id}_face_${target_id}
+    then:
+      - script.execute:
+          id: ${stepper_id}_face_source
+          source: "${target_id}"
+  # release input of this source (wire motion_end_callback_script to it)
+  - id: ${stepper_id}_release_${target_id}
+    then:
+      - script.execute:
+          id: ${stepper_id}_release_source
+          source: "${target_id}"

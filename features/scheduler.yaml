@@ -5,6 +5,20 @@
 # ✅ Offline Operation: Schedule persists and continues running even if HA is unavailable
 # ✅ Manual Override: Toggle switch manually if needed
 # ✅ Persisting Schedules in EEPROM: Ensures schedules are restored after reboots
+#
+# SETUP REQUIRED IN HOME ASSISTANT:
+# Create the following input_text helpers in Home Assistant:
+#   - input_text.${id}_monday_schedule
+#   - input_text.${id}_tuesday_schedule
+#   - input_text.${id}_wednesday_schedule
+#   - input_text.${id}_thursday_schedule
+#   - input_text.${id}_friday_schedule
+#   - input_text.${id}_saturday_schedule
+#   - input_text.${id}_sunday_schedule
+#
+# Format for schedule: "HH:MM-HH:MM,HH:MM-HH:MM"
+# Example: "08:00-12:00,14:00-18:00"
+
 substitutions:
   id: scheduled_switch
   friendly_name: "Scheduled Switch"
@@ -14,29 +28,6 @@ substitutions:
 packages:
   time: !include ../time.yaml
 
-input_text:
-  ${id}_monday_schedule:
-    name: ${friendly_name} Monday Schedule
-    icon: mdi:calendar
-  ${id}_tuesday_schedule:
-    name: ${friendly_name} Tuesday Schedule
-    icon: mdi:calendar
-  ${id}_wednesday_schedule:
-    name: ${friendly_name} Wednesday Schedule
-    icon: mdi:calendar
-  ${id}_thursday_schedule:
-    name: ${friendly_name} Thursday Schedule
-    icon: mdi:calendar
-  ${id}_friday_schedule:
-    name: ${friendly_name} Friday Schedule
-    icon: mdi:calendar
-  ${id}_saturday_schedule:
-    name: ${friendly_name} Saturday Schedule
-    icon: mdi:calendar
-  ${id}_sunday_schedule:
-    name: ${friendly_name} Sunday Schedule
-    icon: mdi:calendar
-
 globals:
   - id: ${id}_weekly_schedule
     type: std::string[7]
@@ -44,8 +35,8 @@ globals:
     initial_value: '""'
 
 api:
-  services:
-    - service: update_schedule
+  actions:
+    - action: ${id}_update_schedule
       variables:
         monday: string
         tuesday: string
@@ -56,23 +47,23 @@ api:
         sunday: string
       then:
         - lambda: |-
-            id(weekly_schedule)[0] = monday;
-            id(weekly_schedule)[1] = tuesday;
-            id(weekly_schedule)[2] = wednesday;
-            id(weekly_schedule)[3] = thursday;
-            id(weekly_schedule)[4] = friday;
-            id(weekly_schedule)[5] = saturday;
-            id(weekly_schedule)[6] = sunday;
+            id(${id}_weekly_schedule)[0] = monday;
+            id(${id}_weekly_schedule)[1] = tuesday;
+            id(${id}_weekly_schedule)[2] = wednesday;
+            id(${id}_weekly_schedule)[3] = thursday;
+            id(${id}_weekly_schedule)[4] = friday;
+            id(${id}_weekly_schedule)[5] = saturday;
+            id(${id}_weekly_schedule)[6] = sunday;
             ESP_LOGI("scheduler", "Updated schedule from Home Assistant");
 
-sensor:
+text_sensor:
   - platform: homeassistant
     entity_id: input_text.${id}_monday_schedule
     id: ${id}_monday_schedule
     internal: true
     on_value:
       then:
-        - lambda: "id(weekly_schedule)[0] = x.c_str();"
+        - lambda: "id(${id}_weekly_schedule)[0] = x.c_str();"
 
   - platform: homeassistant
     entity_id: input_text.${id}_tuesday_schedule
@@ -130,10 +121,12 @@ interval:
         if (time_now.is_valid()) {
             int current_hour = time_now.hour;
             int current_minute = time_now.minute;
-            int current_day = time_now.weekday; // 0=Monday, 6=Sunday
+            // day_of_week: 1=Sunday, 2=Monday, ..., 7=Saturday
+            // convert to 0=Monday .. 6=Sunday
+            int current_day = (time_now.day_of_week + 5) % 7;
             bool should_be_on = false;
 
-            std::string schedule = id(weekly_schedule)[current_day];
+            std::string schedule = id(${id}_weekly_schedule)[current_day];
 
             // Split schedule string into time ranges (Format: HH:MM-HH:MM, HH:MM-HH:MM, ...)
             std::stringstream ss(schedule);
@@ -150,8 +143,8 @@ interval:
             }
 
             if (should_be_on) {
-                id(controlled_switch_id).turn_on();
+                id(${controlled_switch_id}).turn_on();
             } else {
-                id(controlled_switch_id).turn_off();
+                id(${controlled_switch_id}).turn_off();
             }
         }
